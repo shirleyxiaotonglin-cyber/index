@@ -4,7 +4,7 @@ import { requireUser, getProjectRole } from "@/lib/api-context";
 import { taskVisibilityWhere } from "@/lib/task-access";
 import { logTaskHistory } from "@/lib/history";
 import { z } from "zod";
-import { Prisma, TaskPriority, TaskStatus } from "@prisma/client";
+import { Prisma, QueryMode, TaskPriority, TaskStatus } from "@prisma/client";
 
 const createSchema = z.object({
   title: z.string().min(1).max(500),
@@ -47,25 +47,22 @@ export async function GET(
   const q = searchParams.get("q")?.trim();
 
   const visibility = taskVisibilityWhere(projectId, user.id, user.globalRole, role);
-  const searchFilter = q
+  const searchFilter: Prisma.TaskWhereInput | null = q
     ? {
         OR: [
-          { title: { contains: q, mode: "insensitive" } },
-          { description: { contains: q, mode: "insensitive" } },
+          { title: { contains: q, mode: QueryMode.insensitive } },
+          { description: { contains: q, mode: QueryMode.insensitive } },
         ],
       }
     : null;
-  const tagFilter = tag ? { tags: { has: tag } } : null;
+  const tagFilter: Prisma.TaskWhereInput | null = tag ? { tags: { has: tag } } : null;
 
-  const where: Prisma.TaskWhereInput = {
-    AND: [
-      visibility,
-      ...(status ? [{ status }] : []),
-      ...(assigneeId ? [{ assigneeId }] : []),
-      ...(searchFilter ? [searchFilter] : []),
-      ...(tagFilter ? [tagFilter] : []),
-    ],
-  };
+  const andFilters: Prisma.TaskWhereInput[] = [visibility];
+  if (status) andFilters.push({ status });
+  if (assigneeId) andFilters.push({ assigneeId });
+  if (searchFilter) andFilters.push(searchFilter);
+  if (tagFilter) andFilters.push(tagFilter);
+  const where: Prisma.TaskWhereInput = { AND: andFilters };
 
   const tasks = await prisma.task.findMany({
     where,
