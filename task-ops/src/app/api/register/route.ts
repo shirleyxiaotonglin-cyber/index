@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
     await prisma.workgraphAccount.create({
       data: { username, passwordHash },
     });
-    const res = workgraphJson(request, { ok: true, username });
+    const res = workgraphJson(request, { ok: true, username, token });
     res.cookies.set("workgraph_session", token, workgraphCookieOptions());
     return res;
   } catch {

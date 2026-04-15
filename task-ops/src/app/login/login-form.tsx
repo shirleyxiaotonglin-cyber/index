@@ -35,10 +35,13 @@ async function postCredentialsSignIn(
   email: string,
   password: string,
   callbackPath: string,
-): Promise<{ ok: true } | { ok: false; errorCode?: string }> {
+): Promise<{ ok: true } | { ok: false; errorCode?: string; serverError?: boolean }> {
   try {
     const callbackUrl = absoluteCallbackUrl(callbackPath);
     const csrfToken = await getCsrfToken();
+    if (!csrfToken) {
+      return { ok: false, serverError: true };
+    }
     const res = await fetch("/api/auth/callback/credentials", {
       method: "POST",
       headers: {
@@ -46,8 +49,8 @@ async function postCredentialsSignIn(
         "X-Auth-Return-Redirect": "1",
       },
       body: new URLSearchParams({
-        email,
-        password,
+        email: email.trim().toLowerCase(),
+        password: password.trim(),
         csrfToken,
         callbackUrl,
       }),
@@ -57,6 +60,9 @@ async function postCredentialsSignIn(
     if (res.ok) {
       window.location.assign(callbackUrl);
       return { ok: true };
+    }
+    if (res.status >= 500) {
+      return { ok: false, serverError: true };
     }
     let errorCode: string | undefined;
     if (typeof data.url === "string") {
@@ -69,7 +75,7 @@ async function postCredentialsSignIn(
     }
     return { ok: false, errorCode };
   } catch {
-    return { ok: false };
+    return { ok: false, serverError: true };
   }
 }
 
@@ -87,6 +93,10 @@ export function LoginForm() {
   async function doSignIn(userEmail: string, userPassword: string) {
     const result = await postCredentialsSignIn(userEmail, userPassword, callbackPath);
     if (result.ok) return;
+    if (result.serverError) {
+      setError("服务暂时不可用，请稍后重试。若持续失败，请确认 Vercel 已配置 DATABASE_URL、AUTH_SECRET，并已执行 prisma migrate deploy。");
+      return;
+    }
     setError("登录失败，请检查邮箱与密码。");
   }
 

@@ -628,6 +628,14 @@
     opts = opts || {};
     opts.credentials = "include";
     opts.headers = opts.headers || {};
+    try {
+      if (path.indexOf("/api/") === 0) {
+        var wb = localStorage.getItem(WORKGRAPH_BEARER_KEY);
+        if (wb && String(wb).trim()) {
+          opts.headers["Authorization"] = "Bearer " + String(wb).trim();
+        }
+      }
+    } catch (e) {}
     if (opts.body != null && typeof opts.body === "object" && !(opts.body instanceof FormData)) {
       opts.headers["Content-Type"] = "application/json";
       opts.body = JSON.stringify(opts.body);
@@ -1061,6 +1069,21 @@
 
   function clearSession() {
     localStorage.removeItem(SESSION_STORAGE_KEY);
+  }
+
+  /** 跨域 API 在 iOS Safari 上常无法保存 Cookie；登录接口同时返回 token，存本地并用 Authorization 携带 */
+  var WORKGRAPH_BEARER_KEY = "workgraph_bearer_token";
+  function persistWorkgraphTokenFromResponse(data) {
+    if (data && data.token && String(data.token).trim()) {
+      try {
+        localStorage.setItem(WORKGRAPH_BEARER_KEY, String(data.token).trim());
+      } catch (e) {}
+    }
+  }
+  function clearWorkgraphBearer() {
+    try {
+      localStorage.removeItem(WORKGRAPH_BEARER_KEY);
+    } catch (e) {}
   }
 
   function migrateStateObject(o) {
@@ -4299,6 +4322,7 @@
             })
             .then(function (res) {
               if (res.ok && res.data && res.data.ok) {
+                persistWorkgraphTokenFromResponse(res.data);
                 activeAccount = res.data.username || u;
                 setSession(activeAccount);
                 return apiFetch("/api/session").then(function (r2) {
@@ -4385,6 +4409,7 @@
             })
             .then(function (authData) {
               if (!authData || !authData.ok) return;
+              persistWorkgraphTokenFromResponse(authData);
               activeAccount = authData.username || DEMO_AUTH_USER;
               setSession(activeAccount);
               return apiFetch("/api/session").then(function (r) {
@@ -4466,6 +4491,7 @@
             })
             .then(function (res) {
               if (res.ok && res.data && res.data.ok) {
+                persistWorkgraphTokenFromResponse(res.data);
                 activeAccount = res.data.username || u;
                 setSession(activeAccount);
                 state = emptyState(activeAccount);
@@ -5851,6 +5877,7 @@
             : Promise.resolve();
           p.finally(function () {
             apiFetch("/api/logout", { method: "POST" }).finally(function () {
+              clearWorkgraphBearer();
               clearSession();
               activeAccount = null;
               state = null;

@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { workgraphJson, workgraphPreflightHeaders } from "@/lib/workgraph-cors";
-import { verifyWorkgraphToken } from "@/lib/workgraph-session";
+import { getUsernameFromWorkgraphRequest } from "@/lib/workgraph-request-auth";
 
 export async function OPTIONS(request: NextRequest) {
   return new Response(null, { status: 204, headers: workgraphPreflightHeaders(request) });
@@ -9,8 +9,7 @@ export async function OPTIONS(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    const token = request.cookies.get("workgraph_session")?.value;
-    const username = token ? await verifyWorkgraphToken(token) : null;
+    const username = await getUsernameFromWorkgraphRequest(request);
     if (!username) {
       return workgraphJson(request, { ok: false, error: "未登录" }, { status: 401 });
     }

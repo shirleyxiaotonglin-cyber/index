@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
     if (!row || !(await bcrypt.compare(password, row.passwordHash))) {
       return workgraphJson(request, { ok: false, error: "用户名或密码错误" }, { status: 401 });
     }
-    const res = workgraphJson(request, { ok: true, username });
+    const res = workgraphJson(request, { ok: true, username, token });
     res.cookies.set("workgraph_session", token, workgraphCookieOptions());
     return res;
   } catch {

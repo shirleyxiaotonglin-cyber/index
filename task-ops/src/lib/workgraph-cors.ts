@@ -41,7 +41,10 @@ export function workgraphPreflightHeaders(request: NextRequest): Headers {
   const headers = new Headers();
   applyWorkgraphCors(request, headers);
   headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS");
-  headers.set("Access-Control-Allow-Headers", "Content-Type, X-Auth-Return-Redirect");
+  headers.set(
+    "Access-Control-Allow-Headers",
+    "Content-Type, X-Auth-Return-Redirect, Authorization",
+  );
   headers.set("Access-Control-Max-Age", "86400");
   return headers;
 }

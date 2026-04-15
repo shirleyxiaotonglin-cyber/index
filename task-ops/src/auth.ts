@@ -26,7 +26,7 @@ if (process.env.VERCEL) {
 async function syncDemoUserIfCredentialsMatch(email: string, plainPassword: string) {
   if (process.env.ENABLE_DEMO_BOOTSTRAP === "false") return;
   const demoEmail = (process.env.DEMO_EMAIL ?? "admin@demo.com").toLowerCase().trim();
-  const demoPass = process.env.DEMO_PASSWORD ?? "demo123";
+  const demoPass = (process.env.DEMO_PASSWORD ?? "demo123").trim();
   if (email !== demoEmail || plainPassword !== demoPass) return;
   const passwordHash = await bcrypt.hash(demoPass, 10);
   await prisma.user.upsert({
@@ -57,24 +57,29 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
         const email = String(credentials.email).toLowerCase().trim();
-        const password = String(credentials.password);
+        const password = String(credentials.password).trim();
 
-        await syncDemoUserIfCredentialsMatch(email, password);
+        try {
+          await syncDemoUserIfCredentialsMatch(email, password);
 
-        const user = await prisma.user.findUnique({
-          where: { email },
-        });
+          const user = await prisma.user.findUnique({
+            where: { email },
+          });
 
-        if (!user?.passwordHash) return null;
-        const ok = await bcrypt.compare(password, user.passwordHash);
-        if (!ok) return null;
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          image: user.image,
-          globalRole: user.globalRole,
-        };
+          if (!user?.passwordHash) return null;
+          const ok = await bcrypt.compare(password, user.passwordHash);
+          if (!ok) return null;
+          return {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            image: user.image,
+            globalRole: user.globalRole,
+          };
+        } catch (err) {
+          console.error("[auth] credentials authorize failed", err);
+          return null;
+        }
       },
     }),
   ],
