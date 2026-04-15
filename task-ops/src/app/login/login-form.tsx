@@ -1,8 +1,7 @@
 "use client";
 
 import { getCsrfToken } from "next-auth/react";
-import { useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -58,7 +57,16 @@ async function postCredentialsSignIn(
     });
     const data = (await res.json().catch(() => ({}))) as { url?: string };
     if (res.ok) {
-      window.location.assign(callbackUrl);
+      let target = callbackUrl;
+      if (typeof data.url === "string" && data.url.trim()) {
+        const u = data.url.trim();
+        if (/^https?:\/\//i.test(u)) {
+          target = u;
+        } else if (u.startsWith("/")) {
+          target = `${window.location.origin}${u}`;
+        }
+      }
+      window.location.replace(target);
       return { ok: true };
     }
     if (res.status >= 500) {
@@ -80,9 +88,16 @@ async function postCredentialsSignIn(
 }
 
 export function LoginForm() {
-  const searchParams = useSearchParams();
-  /** 仅路径，如 /projects — 始终用相对路径传给 signIn，避免 SSR/CSR 不一致 */
-  const callbackPath = normalizeCallbackUrl(searchParams.get("callbackUrl"));
+  /** 不用 useSearchParams（生产上曾导致 Suspense 一直挂起，页面只显示「加载…」） */
+  const [callbackPath, setCallbackPath] = useState("/");
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      setCallbackPath(normalizeCallbackUrl(params.get("callbackUrl")));
+    } catch {
+      setCallbackPath("/");
+    }
+  }, []);
   const [email, setEmail] = useState("admin@demo.com");
   const [password, setPassword] = useState("demo123");
   const [name, setName] = useState("");

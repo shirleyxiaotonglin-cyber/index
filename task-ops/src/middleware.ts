@@ -13,6 +13,10 @@ export async function middleware(request: NextRequest) {
   if (pathname.startsWith("/api")) {
     return NextResponse.next();
   }
+  /** 静态协作页（public/workgraph.html），使用独立账号体系，不走 NextAuth 中间件 */
+  if (pathname === "/workgraph.html") {
+    return NextResponse.next();
+  }
   if (publicPaths.some((p) => pathname.startsWith(p))) {
     return NextResponse.next();
   }

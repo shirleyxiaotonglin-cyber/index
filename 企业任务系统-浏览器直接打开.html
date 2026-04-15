@@ -594,8 +594,9 @@
    * 公网静态站（task-ops-static.vercel.app）→ 同主机 :3780 启发式（本地 task-server）。
    */
   function apiBase() {
-    if (typeof window.API_BASE === "string" && window.API_BASE.length) {
-      return window.API_BASE.replace(/\/$/, "");
+    if (typeof window.API_BASE === "string") {
+      if (window.API_BASE === "") return "";
+      if (window.API_BASE.length) return window.API_BASE.replace(/\/$/, "");
     }
     try {
       var ls = localStorage.getItem("workgraph_api_base");
@@ -606,11 +607,12 @@
       if (pr !== "http:" && pr !== "https:") return "";
       var h = location.hostname;
       if (h === "task-ops-static.vercel.app") {
-        var syncDefault =
-          typeof window.WORKGRAPH_SYNC_API === "string" && window.WORKGRAPH_SYNC_API.trim()
-            ? window.WORKGRAPH_SYNC_API.trim().replace(/\/$/, "")
-            : "https://task-ops-ivory.vercel.app";
-        return syncDefault;
+        if (typeof window.WORKGRAPH_SYNC_API === "string" && window.WORKGRAPH_SYNC_API.trim()) {
+          return window.WORKGRAPH_SYNC_API.trim().replace(/\/$/, "");
+        }
+        // 与 Next.js（/api）同域部署时：用相对路径。若 API 在别的域名，请在控制台设置：
+        // localStorage.setItem("workgraph_api_base","https://你的后端根地址")
+        return "";
       }
       var loopback = h === "localhost" || h === "127.0.0.1" || h === "[::1]" || h === "::1";
       var lan = isPrivateLanHostname(h);

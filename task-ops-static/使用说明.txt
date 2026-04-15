@@ -14,11 +14,12 @@ Task Ops 离线版 — 直接使用
 
 4. 数据保存在当前浏览器的「本地存储」中；清除站点数据会重置演示数据
 
-5. 部署在 https://task-ops-static.vercel.app 时，默认会把数据同步到后端
-   https://task-ops-ivory.vercel.app（需在该项目执行数据库迁移并配置 AUTH_SECRET）。
-   若你的同步 API 地址不同，可在页面控制台执行：
-   localStorage.setItem("workgraph_api_base","https://你的API根地址")
-   或设置 window.WORKGRAPH_SYNC_API 后刷新。
+5. 跨设备同步需要「页面」与「/api 后端」在同一站点或由你手动指定 API 地址：
+   · 推荐：在 Vercel 只部署仓库里的 task-ops（Next.js），数据库迁移 + AUTH_SECRET 配好，
+     用 https://你的域名/workgraph.html 打开协作页（同域 /api，手机与电脑数据一致）。
+   · 若只部署纯静态 task-ops-static、API 在另一域名，请在控制台执行：
+     localStorage.setItem("workgraph_api_base","https://你的后端根地址")
+     后刷新（不要末尾斜杠）。
 
 6. 若双击后仍是空白页，请右键 index.html → 打开方式 → 选浏览器
 

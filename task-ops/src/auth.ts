@@ -44,6 +44,8 @@ async function syncDemoUserIfCredentialsMatch(email: string, plainPassword: stri
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   trustHost: true,
+  /** 与 middleware 里 getToken 一致，避免 JWT 无法校验导致登录后仍被重定向回 /login */
+  secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
   adapter: PrismaAdapter(prisma) as Adapter,
   session: { strategy: "jwt", maxAge: 30 * 24 * 60 * 60 },
   pages: { signIn: "/login" },
