@@ -2,7 +2,7 @@
  * OpenRouter 统一调用层：所有 AI 功能都走这里。
  */
 const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
-const DEFAULT_MODEL = "meta-llama/llama-3.1-8b-instruct:free";
+const DEFAULT_MODEL = "meta-llama/llama-3.3-70b-instruct:free";
 
 function resolveModel(): string {
   const raw = (process.env.OPENROUTER_MODEL || "").trim();
