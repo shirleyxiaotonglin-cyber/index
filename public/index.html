@@ -655,6 +655,24 @@
     return "";
   }
 
+  /**
+   * 是否可请求会议纪要 AI：meetingAiApiBase 为 "" 时表示「同源 + 相对路径 /api」，合法，不能用 !meetingAiApiBase() 误判。
+   */
+  function hasMeetingAiApiEndpoint() {
+    var b;
+    try {
+      b = meetingAiApiBase();
+    } catch (e) {
+      return false;
+    }
+    if (b) return true;
+    try {
+      var p = location.protocol;
+      if (p === "http:" || p === "https:") return true;
+    } catch (e2) {}
+    return false;
+  }
+
   /** 仅用于 /api/ai/parse-meeting；跨域时 credentials 用 omit，避免 CORS 与 cookie 冲突 */
   function meetingAiFetch(path, opts) {
     opts = opts || {};
@@ -4568,7 +4586,7 @@
       done({ err: "AI 已禁用（页面设置了 DISABLE_MEETING_AI）。" });
       return;
     }
-    if (!meetingAiApiBase()) {
+    if (!hasMeetingAiApiEndpoint()) {
       done({
         err:
           "未配置会议纪要 AI 服务地址。请在页面脚本中设置 WORKGRAPH_AI_PARSE_ORIGIN_FALLBACK，或执行：localStorage.setItem(\"workgraph_ai_api_base\",\"https://你的域名\")",
