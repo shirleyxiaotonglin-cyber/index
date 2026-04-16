@@ -1,4 +1,4 @@
-import { chatJsonWithSystem } from "./openai";
+import { chatJsonWithSystem } from "@/lib/openai";
 
 function truncate(s: string, max: number) {
   const t = s.trim();
