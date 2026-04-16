@@ -1,3 +1,4 @@
+// src/lib/meeting-parse-openai.ts
 /**
  * 会议纪要 → 结构化 JSON（供单页 index.html 的 normalizeAiMeetingParsed 使用）
  */
@@ -73,4 +74,18 @@ export async function parseMeetingWithAi(text: string): Promise<MeetingParseResu
     return { ok: false, error: "接口返回非 JSON", detail: raw.slice(0, 200) };
   }
 
-  const content = (data as { choices?: { message?: { content
+  const content = (data as { choices?: { message?: { content?: string } }[] })?.choices?.[0]?.message
+    ?.content;
+  if (!content || typeof content !== "string") {
+    return { ok: false, error: "模型未返回内容", detail: raw.slice(0, 200) };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return { ok: false, error: "模型输出不是合法 JSON", detail: content.slice(0, 240) };
+  }
+
+  return { ok: true, parsed };
+}
