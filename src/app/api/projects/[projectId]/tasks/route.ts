@@ -4,7 +4,7 @@ import { requireUser, getProjectRole } from "@/lib/api-context";
 import { taskVisibilityWhere } from "@/lib/task-access";
 import { logTaskHistory } from "@/lib/history";
 import { z } from "zod";
-import { Prisma, QueryMode, TaskPriority, TaskStatus } from "@prisma/client";
+import { Prisma, TaskPriority, TaskStatus } from "@prisma/client";
 
 const createSchema = z.object({
   title: z.string().min(1).max(500),
@@ -50,8 +50,8 @@ export async function GET(
   const searchFilter: Prisma.TaskWhereInput | null = q
     ? {
         OR: [
-          { title: { contains: q, mode: QueryMode.insensitive } },
-          { description: { contains: q, mode: QueryMode.insensitive } },
+          { title: { contains: q, mode: Prisma.QueryMode.insensitive } },
+          { description: { contains: q, mode: Prisma.QueryMode.insensitive } },
         ],
       }
     : null;
