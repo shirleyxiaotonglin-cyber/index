@@ -17,8 +17,16 @@ import {
   llmRiskPredict,
   llmWorkloadResult,
 } from "@/lib/ai-llm";
-import { openaiChatCompletionText } from "@/lib/openai";
+import { hasOpenRouterKey, chatText } from "@/lib/openai";
+import { runTypedAi } from "@/lib/ai-typed-openai";
 import { z } from "zod";
+
+/** POST { type, content, projectId } → OpenRouter JSON（与 kind / prompt 体系独立） */
+const typedBodySchema = z.object({
+  type: z.enum(["breakdown", "plan", "report"]),
+  content: z.string().min(1),
+  projectId: z.string().min(1),
+});
 
 const bodySchema = z.object({
   kind: z.enum([
@@ -40,6 +48,30 @@ const bodySchema = z.object({
 export async function POST(req: Request) {
   const json = await req.json().catch(() => null);
 
+  const typed = typedBodySchema.safeParse(json);
+  if (typed.success) {
+    const user = await requireUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!hasOpenRouterKey()) {
+      return NextResponse.json({ error: "未配置 OPENROUTER_API_KEY" }, { status: 503 });
+    }
+    const { type, content, projectId } = typed.data;
+    const role = await getProjectRole(user.id, projectId);
+    if (user.globalRole !== "ADMIN" && !role) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    const project = await prisma.project.findUnique({ where: { id: projectId } });
+    if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+    try {
+      const result = await runTypedAi(type, content, project.name, projectId);
+      return NextResponse.json({ result });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return NextResponse.json({ error: msg }, { status: 502 });
+    }
+  }
+
   // 新接口：{ prompt: string } → { result: string }（与 kind 体系互斥）
   if (
     json &&
@@ -51,11 +83,11 @@ export async function POST(req: Request) {
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    if (!process.env.OPENAI_API_KEY?.trim()) {
-      return NextResponse.json({ error: "OPENAI_API_KEY not configured" }, { status: 503 });
+    if (!process.env.OPENROUTER_API_KEY?.trim()) {
+      return NextResponse.json({ error: "未配置 OPENROUTER_API_KEY" }, { status: 503 });
     }
     try {
-      const result = await openaiChatCompletionText((json as { prompt: string }).prompt);
+      const result = await chatText((json as { prompt: string }).prompt);
       return NextResponse.json({ result });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

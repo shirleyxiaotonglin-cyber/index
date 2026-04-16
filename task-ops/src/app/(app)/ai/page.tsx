@@ -76,8 +76,8 @@ function AiInner() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">AI 控制中心</h1>
         <p className="text-sm text-muted-foreground">
-          配置环境变量 <code className="rounded bg-muted px-1">OPENAI_API_KEY</code> 后，由{" "}
-          <strong>gpt-4o-mini</strong> 生成；未配置时自动使用规则引擎。
+          配置环境变量 <code className="rounded bg-muted px-1">OPENROUTER_API_KEY</code> 后，由{" "}
+          <strong>OpenRouter</strong> 生成；未配置时自动使用规则引擎。
         </p>
       </div>
 

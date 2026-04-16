@@ -46,12 +46,16 @@ module.exports = async function handler(req, res) {
   if (!text) {
     return res.status(400).json({ ok: false, error: "text 为空" });
   }
-  const key = process.env.OPENAI_API_KEY;
+  const key = process.env.OPENROUTER_API_KEY;
   if (!key || !String(key).trim()) {
-    return res.status(503).json({ ok: false, error: "服务器未配置 OPENAI_API_KEY" });
+    return res.status(503).json({ ok: false, error: "服务器未配置 OPENROUTER_API_KEY" });
   }
-  const model = process.env.OPENAI_MEETING_MODEL || "gpt-4o-mini";
-  const r = await fetch("https://api.openai.com/v1/chat/completions", {
+  const base = "https://openrouter.ai/api/v1";
+  const model =
+    process.env.OPENROUTER_MEETING_MODEL ||
+    process.env.OPENROUTER_MODEL ||
+    "meta-llama/llama-3.1-8b-instruct:free";
+  const r = await fetch(base + "/chat/completions", {
     method: "POST",
     headers: {
       Authorization: "Bearer " + String(key).trim(),
@@ -69,17 +73,17 @@ module.exports = async function handler(req, res) {
   });
   const raw = await r.text();
   if (!r.ok) {
-    return res.status(502).json({ ok: false, error: "OpenAI 请求失败", detail: raw.slice(0, 400) });
+    return res.status(502).json({ ok: false, error: "模型请求失败", detail: raw.slice(0, 400) });
   }
   let data;
   try {
     data = JSON.parse(raw);
   } catch {
-    return res.status(502).json({ ok: false, error: "OpenAI 返回非 JSON", detail: raw.slice(0, 200) });
+    return res.status(502).json({ ok: false, error: "接口返回非 JSON", detail: raw.slice(0, 200) });
   }
   const content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
   if (!content || typeof content !== "string") {
-    return res.status(502).json({ ok: false, error: "OpenAI 未返回内容", detail: raw.slice(0, 200) });
+    return res.status(502).json({ ok: false, error: "模型未返回内容", detail: raw.slice(0, 200) });
   }
   let parsed;
   try {

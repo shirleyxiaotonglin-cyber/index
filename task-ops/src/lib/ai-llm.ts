@@ -1,8 +1,8 @@
 /**
- * 在配置了 OPENAI_API_KEY 时用 gpt-4o-mini 生成分析；否则应使用 ai-mock 的同名函数结果。
+ * 在配置了 OPENROUTER_API_KEY 时生成分析；否则使用 ai-mock 的同名函数结果。
  */
 import type { Project, Task } from "@prisma/client";
-import { openaiChatJson, hasOpenAiKey } from "@/lib/openai";
+import { chatJsonPrompt, hasOpenRouterKey } from "@/lib/openai";
 import * as mock from "@/lib/ai-mock";
 
 type TaskLite = Pick<Task, "title" | "status" | "priority" | "deadline" | "startTime">;
@@ -14,12 +14,12 @@ function truncateJson(obj: unknown, maxLen = 28000): string {
 }
 
 async function tryJson<T>(prompt: string, fallback: T): Promise<T> {
-  if (!hasOpenAiKey()) return fallback;
+  if (!hasOpenRouterKey()) return fallback;
   try {
-    const text = await openaiChatJson(prompt);
+    const text = await chatJsonPrompt(prompt);
     return JSON.parse(text) as T;
   } catch (e) {
-    console.error("[ai-llm] OpenAI failed, using mock:", e);
+    console.error("[ai-llm] OpenRouter failed, using mock:", e);
     return fallback;
   }
 }

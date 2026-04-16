@@ -4031,7 +4031,7 @@
           err:
             "请求失败（" +
             hint +
-            "）。请确认：① 通过 http(s) 打开本页且 task-server 已启动；② 地址栏主机与登录时一致（勿混用 localhost 与 127.0.0.1）；③ 已 export OPENAI_API_KEY 并重启服务。",
+            "）。请确认：① 通过 http(s) 打开本页且 task-server 已启动；② 地址栏主机与登录时一致（勿混用 localhost 与 127.0.0.1）；③ 已 export OPENROUTER_API_KEY 并重启服务。",
         });
       });
   }
@@ -4161,7 +4161,7 @@
     }
     openModal(
       "<h3>会议纪要 / 文字导入</h3>" +
-        '<p class="muted" style="margin:0 0 0.5rem;font-size:12px;line-height:1.55">粘贴会议记录或待办。<strong>智能规则</strong>：支持 <strong>任务1：</strong> / <strong>- 列表</strong>、<strong>阶段小标题</strong>（如 1️⃣ 前期准备阶段，用于流程列）、<strong>续行</strong>（负责人/协作/<strong>DDL：03/03</strong>（月/日）等并入上一条）、<strong>Markdown 表格</strong>、<strong>整段自然语言纪要</strong>（含《项目名》、<strong>于M月D日完成…</strong>、<strong>由…负责/牵头</strong>、<strong>，并由…</strong> 等，自动拆日期与负责人）、<strong>@姓名</strong>、<strong>【P0】</strong>、<strong>优先级：🔥 高</strong>。<strong>AI 结构化</strong>（在线且配置 OPENAI_API_KEY）适合长文管线、自动推断阶段下标与全年日期。</p>' +
+        '<p class="muted" style="margin:0 0 0.5rem;font-size:12px;line-height:1.55">粘贴会议记录或待办。<strong>智能规则</strong>：支持 <strong>任务1：</strong> / <strong>- 列表</strong>、<strong>阶段小标题</strong>（如 1️⃣ 前期准备阶段，用于流程列）、<strong>续行</strong>（负责人/协作/<strong>DDL：03/03</strong>（月/日）等并入上一条）、<strong>Markdown 表格</strong>、<strong>整段自然语言纪要</strong>（含《项目名》、<strong>于M月D日完成…</strong>、<strong>由…负责/牵头</strong>、<strong>，并由…</strong> 等，自动拆日期与负责人）、<strong>@姓名</strong>、<strong>【P0】</strong>、<strong>优先级：🔥 高</strong>。<strong>AI 结构化</strong>（在线且配置 OPENROUTER_API_KEY）适合长文管线、自动推断阶段下标与全年日期。</p>' +
         '<textarea id="meet-ta" class="input" style="min-height:200px;resize:vertical" placeholder="项目：示例项目\n阶段：策划, 开发, 测试\n\n- 需求文档\n负责人：李四\n协作：王五\n截止 2026-06-15\nP1\n\n| 任务 | 负责人 | 截止 |\n| UI 评审 | 张三 | 2026-06-20 |"></textarea>' +
         '<div class="row" style="margin-top:0.65rem"><label>目标</label><div class="flex" style="flex-direction:column;align-items:flex-start;gap:0.35rem;font-size:13px">' +
         '<label><input type="radio" name="meet-mode" id="meet-mode-new" value="new" ' +
@@ -4181,7 +4181,7 @@
           ? '<div class="row"><label>解析方式</label><span class="muted" style="font-size:12px">已禁用 AI（页面设置了 DISABLE_MEETING_AI），仅使用智能规则。</span></div>'
           : '<div class="row"><label>解析方式</label><div style="display:flex;flex-direction:column;gap:0.4rem;font-size:13px">' +
             '<label style="cursor:pointer"><input type="radio" name="meet-parse" id="meet-parse-rules" value="rules" /> <strong>智能规则</strong>（本地，分块/续行/表格）</label>' +
-            '<label style="cursor:pointer"><input type="radio" name="meet-parse" id="meet-parse-ai" value="ai" checked /> <strong>AI 结构化</strong>（服务端 OpenAI，需环境变量 OPENAI_API_KEY）</label></div>' +
+            '<label style="cursor:pointer"><input type="radio" name="meet-parse" id="meet-parse-ai" value="ai" checked /> <strong>AI 结构化</strong>（服务端 OpenRouter，需环境变量 OPENROUTER_API_KEY）</label></div>' +
             '<p class="muted" style="margin:0.35rem 0 0;font-size:11px;line-height:1.45">（v2）默认优先「AI 结构化」，任意设备可用；失败时自动改用智能规则。</p></div>') +
         '<pre id="meet-pre" class="muted" style="white-space:pre-wrap;max-height:160px;overflow:auto;font-size:11px;margin:0.65rem 0;padding:0.55rem;background:#f8fafc;border:1px solid var(--border);border-radius:8px">点击「预览解析」查看识别结果</pre>' +
         '<div class="flex" style="justify-content:flex-end;gap:0.5rem;flex-wrap:wrap">' +

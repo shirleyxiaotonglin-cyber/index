@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { parseMeetingWithOpenAI } from "@/lib/meeting-parse-openai";
+import { parseMeetingWithAi } from "@/lib/meeting-parse-openai";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -37,9 +37,9 @@ export async function POST(req: Request) {
     return withCors(NextResponse.json({ ok: false, error: "text 为空" }, { status: 400 }));
   }
 
-  const out = await parseMeetingWithOpenAI(text);
+  const out = await parseMeetingWithAi(text);
   if (!out.ok) {
-    const status = out.error.includes("OPENAI_API_KEY") ? 503 : 502;
+    const status = out.error.includes("OPENROUTER_API_KEY") ? 503 : 502;
     return withCors(
       NextResponse.json({ ok: false, error: out.error, detail: out.detail }, { status })
     );

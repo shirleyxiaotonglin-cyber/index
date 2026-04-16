@@ -38,7 +38,7 @@
 
 可选（AI 真实接口）：
 
-| `OPENAI_API_KEY` | 若使用 OpenAI 兼容接口 |
+| `OPENROUTER_API_KEY` | OpenRouter API Key |
 | `OPENAI_BASE_URL` | 默认 `https://api.openai.com/v1` |
 
 保存后，对 **Production**（及需要的话 **Preview**）勾选这些变量。
