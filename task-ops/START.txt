@@ -38,7 +38,7 @@ A) 浏览器提示 ERR_CONNECTION_REFUSED / 无法连接
 B) 能打开 /health，但登录后白屏或接口报错
    → 多半是 DATABASE_URL 不对或 PostgreSQL 没启动。检查 .env、数据库服务、再执行 npx prisma db push。
 
-C) 你在双击打开「企业任务系统-浏览器直接打开.html」
+C) 你在双击打开「index.html」
    → 那是单机离线演示，不是本 Next 项目。完整功能必须用上面的 npm run dev + 浏览器访问 http://127.0.0.1:3000 。
 
 D) 端口被占用

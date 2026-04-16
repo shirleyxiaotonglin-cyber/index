@@ -3,7 +3,23 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>项目任务协作台 — 管项目、跟任务、看进度</title>
+  <!--
+    【Supabase 在线协作】在下方或单独脚本中设置（勿把 service role 写入前端）：
+    window.SUPABASE_URL = "https://你的项目.supabase.co";
+    window.SUPABASE_ANON_KEY = "anon 公钥";
+    并在 Supabase SQL Editor 执行 supabase/schema.sql；若刷新后数据变空，再执行 supabase/fix_rls_owner_access.sql（修正 RLS）。Publication 启用 Realtime。
+    【手机/其他电脑访问本页】不要用 127.0.0.1。请用「电脑局域网 IP」，例如 http://192.168.1.10:8080/index.html
+    终端执行仓库根目录 ./serve-lan.sh（监听 0.0.0.0）。Supabase 控制台 → Authentication → URL 配置 → Redirect URLs
+    增加 http://你的局域网IP:8080/** ，否则登录/验证可能失败。
+  -->
+  <script>
+    window.SUPABASE_URL = "https://eueryfsdyesxcrwotvnz.supabase.co";
+    window.SUPABASE_ANON_KEY = "sb_publishable_ZJqN-H9KA6eSPV1zun1QyQ_Rl-MAomi";
+    /** 会议纪要 AI：显式指定则优先；否则走 apiBase / 同源；仍无时用 FALLBACK（任意设备含 file://、局域网） */
+    window.WORKGRAPH_AI_PARSE_ORIGIN = "";
+    window.WORKGRAPH_AI_PARSE_ORIGIN_FALLBACK = "https://index-ecru-iota.vercel.app";
+  </script>
+   <title>项目任务协作台 — 管项目、跟任务、看进度</title>
   <style>
     :root {
       --bg: radial-gradient(circle at 12% 16%, #eef4ff 0%, #f6f9ff 36%, #f3f6fb 100%);
@@ -538,11 +554,30 @@
   var __syncingCrossAccountShares = false;
   var __forceLocalStorageMode = false;
   var __bootstrapError = "";
+  /** Supabase 协作：在页面中设置 window.SUPABASE_URL 与 window.SUPABASE_ANON_KEY（见文件顶部注释） */
+  var __sb = null;
+  var __sbSaveTimer = null;
+  var __sbReloadTimer = null;
+  var __sbChannel = null;
+  var __applyingRemoteSupabase = false;
+  var projectOwnerIds = {};
+
+  function useSupabaseMode() {
+    try {
+      var u = typeof window.SUPABASE_URL === "string" && window.SUPABASE_URL.trim();
+      var k = typeof window.SUPABASE_ANON_KEY === "string" && window.SUPABASE_ANON_KEY.trim();
+      return !!(u && k);
+    } catch (e) {
+      return false;
+    }
+  }
 
   function shouldForceLocalByHost() {
     try {
       var h = String(window.location.hostname || "").toLowerCase();
       if (!h) return false;
+      /** 官方静态域名需连 Workgraph API（同域或 workgraph_api_base）；勿因 vercel.app 一律单机 */
+      if (h === "task-ops-static.vercel.app") return false;
       if (h.indexOf("vercel.app") !== -1) return true;
       if (h.indexOf("netlify.app") !== -1) return true;
       if (h.indexOf("pages.dev") !== -1) return true;
@@ -568,6 +603,7 @@
   __forceLocalStorageMode = localModeFromQueryOrStorage();
 
   function useServerStorage() {
+    if (useSupabaseMode()) return false;
     if (__forceLocalStorageMode) return false;
     try {
       var p = window.location.protocol;
@@ -575,6 +611,623 @@
     } catch (e) {
       return false;
     }
+  }
+
+  /**
+   * 是否展示「AI 结构化」：默认全开（任意设备）；仅 window.DISABLE_MEETING_AI === true 时关闭。
+   */
+  function canUseAiMeetingParse() {
+    if (useServerStorage()) return true;
+    try {
+      if (typeof window.DISABLE_MEETING_AI === "boolean" && window.DISABLE_MEETING_AI) return false;
+    } catch (e) {}
+    return true;
+  }
+
+  /**
+   * 会议纪要 AI 请求的 API 根：WORKGRAPH_AI_PARSE_ORIGIN → localStorage workgraph_ai_api_base → apiBase() →
+   * 同源相对路径 "" → WORKGRAPH_AI_PARSE_ORIGIN_FALLBACK（公网默认代理，可改为自建）。
+   */
+  function meetingAiApiBase() {
+    try {
+      if (typeof window.WORKGRAPH_AI_PARSE_ORIGIN === "string") {
+        var w = window.WORKGRAPH_AI_PARSE_ORIGIN.trim();
+        if (w.length) return w.replace(/\/$/, "");
+      }
+    } catch (e0) {}
+    try {
+      var la = localStorage.getItem("workgraph_ai_api_base");
+      if (la && String(la).trim()) return String(la).trim().replace(/\/$/, "");
+    } catch (e1) {}
+    var ab = apiBase();
+    if (ab) return ab;
+    try {
+      var p = location.protocol;
+      if (p === "http:" || p === "https:") return "";
+    } catch (e2) {}
+    try {
+      var fb =
+        typeof window.WORKGRAPH_AI_PARSE_ORIGIN_FALLBACK === "string"
+          ? window.WORKGRAPH_AI_PARSE_ORIGIN_FALLBACK.trim()
+          : "";
+      if (fb.length) return fb.replace(/\/$/, "");
+    } catch (e3) {}
+    return "";
+  }
+
+  /** 仅用于 /api/ai/parse-meeting；跨域时 credentials 用 omit，避免 CORS 与 cookie 冲突 */
+  function meetingAiFetch(path, opts) {
+    opts = opts || {};
+    var base = meetingAiApiBase();
+    var url = (base ? base : "") + path;
+    var cross = false;
+    try {
+      cross = !!(base && new URL(base).origin !== window.location.origin);
+    } catch (e) {
+      cross = !!base;
+    }
+    if (cross) opts.credentials = "omit";
+    else {
+      opts.credentials = "include";
+      opts.headers = opts.headers || {};
+      try {
+        if (path.indexOf("/api/") === 0) {
+          var wb = localStorage.getItem("workgraph_bearer_token");
+          if (wb && String(wb).trim()) {
+            opts.headers["Authorization"] = "Bearer " + String(wb).trim();
+          }
+        }
+      } catch (e2) {}
+    }
+    opts.headers = opts.headers || {};
+    if (opts.body != null && typeof opts.body === "object" && !(opts.body instanceof FormData)) {
+      opts.headers["Content-Type"] = "application/json";
+      opts.body = JSON.stringify(opts.body);
+    }
+    return fetch(url, opts);
+  }
+
+  async function ensureSupabaseClient() {
+    if (__sb) return __sb;
+    if (!useSupabaseMode()) throw new Error("未配置 Supabase");
+    var mod;
+    try {
+      mod = await import("https://esm.sh/@supabase/supabase-js@2");
+    } catch (e1) {
+      try {
+        mod = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm");
+      } catch (e2) {
+        throw new Error("无法加载 Supabase SDK，请检查网络或防火墙");
+      }
+    }
+    __sb = mod.createClient(window.SUPABASE_URL.trim(), window.SUPABASE_ANON_KEY.trim(), {
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+    });
+    return __sb;
+  }
+
+  function sbStateCacheKey(uid) {
+    return "workgraph_sb_state_v1_" + String(uid || "");
+  }
+  function persistSbStateCache(uid, st) {
+    if (!uid || !st) return;
+    try {
+      localStorage.setItem(
+        sbStateCacheKey(uid),
+        JSON.stringify({ v: 1, uid: uid, at: Date.now(), state: st })
+      );
+    } catch (e) {}
+  }
+  function readSbStateCache(uid) {
+    if (!uid) return null;
+    try {
+      var j = localStorage.getItem(sbStateCacheKey(uid));
+      if (!j) return null;
+      var o = JSON.parse(j);
+      if (!o || String(o.uid) !== String(uid) || !o.state) return null;
+      if (o.at && Date.now() - o.at > 7 * 24 * 60 * 60 * 1000) return null;
+      return o.state;
+    } catch (e) {
+      return null;
+    }
+  }
+  function clearSbStateCache(uid) {
+    if (!uid) return;
+    try {
+      localStorage.removeItem(sbStateCacheKey(uid));
+    } catch (e) {}
+  }
+  async function resolveSupabaseSession() {
+    try {
+      var r = await __sb.auth.getSession();
+      var session = r.data.session;
+      if (session) return session;
+      await new Promise(function (res) {
+        setTimeout(res, 120);
+      });
+      r = await __sb.auth.getSession();
+      session = r.data.session;
+      if (session) return session;
+      await new Promise(function (res) {
+        setTimeout(res, 280);
+      });
+      r = await __sb.auth.getSession();
+      session = r.data.session;
+      if (session) return session;
+      try {
+        var ref = await __sb.auth.refreshSession();
+        if (ref.data && ref.data.session) return ref.data.session;
+      } catch (e2) {}
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function taskFromRow(row) {
+    return {
+      id: row.id,
+      projectId: row.project_id,
+      title: row.title || "",
+      description: row.description || "",
+      status: row.status || "todo",
+      priority: row.priority || "P2",
+      assignee: row.assignee || "",
+      collaborators: row.collaborators || "",
+      createdBy: row.created_by || "",
+      parentId: row.parent_id || null,
+      pipelineStage: row.pipeline_stage != null ? row.pipeline_stage : 0,
+      chainOrder: row.chain_order != null ? row.chain_order : null,
+      startTime: row.start_time || "",
+      deadline: row.deadline || "",
+      estimatedHours: row.estimated_hours != null ? Number(row.estimated_hours) : 0,
+      actualHours: row.actual_hours != null ? Number(row.actual_hours) : 0,
+      tags: row.tags || "",
+    };
+  }
+
+  function taskRowFromTask(t) {
+    return {
+      id: t.id,
+      project_id: t.projectId,
+      title: t.title || "",
+      description: t.description || "",
+      status: t.status || "todo",
+      priority: t.priority || "P2",
+      assignee: t.assignee || "",
+      collaborators: t.collaborators || "",
+      created_by: t.createdBy || "",
+      parent_id: t.parentId || null,
+      pipeline_stage: t.pipelineStage != null ? t.pipelineStage : 0,
+      chain_order: t.chainOrder != null ? t.chainOrder : null,
+      start_time: t.startTime || "",
+      deadline: t.deadline || "",
+      estimated_hours: t.estimatedHours != null ? t.estimatedHours : 0,
+      actual_hours: t.actualHours != null ? t.actualHours : 0,
+      tags: t.tags || "",
+      updated_at: new Date().toISOString(),
+    };
+  }
+
+  function projectExtraFromProj(p) {
+    var skip = {
+      id: 1,
+      name: 1,
+      archived: 1,
+      createdAt: 1,
+      owner: 1,
+      members: 1,
+      pipelineStages: 1,
+      chainMode: 1,
+    };
+    var ex = {};
+    for (var k in p) {
+      if (skip[k] || k.indexOf("_") === 0) continue;
+      ex[k] = p[k];
+    }
+    return ex;
+  }
+
+  async function loadStateFromSupabase(userId) {
+    await ensureSupabaseClient();
+    var sb = __sb;
+    var displayName = "";
+    var avatar = "👤";
+    var profileTitle = "";
+    var profileBio = "";
+    var profRes = await sb.from("profiles").select("*").eq("id", userId).maybeSingle();
+    if (profRes.data) {
+      displayName = profRes.data.display_name || "";
+      avatar = profRes.data.avatar || "👤";
+      profileTitle = profRes.data.profile_title || "";
+      profileBio = profRes.data.profile_bio || "";
+    }
+    var memRes = await sb.from("project_members").select("project_id").eq("user_id", userId);
+    var projectIds = (memRes.data || []).map(function (m) {
+      return m.project_id;
+    });
+    var ownRes = await sb.from("projects").select("id").eq("owner_id", userId);
+    var ownIds = (ownRes.data || []).map(function (r) {
+      return r.id;
+    });
+    var idSet = {};
+    var mi;
+    for (mi = 0; mi < projectIds.length; mi++) idSet[projectIds[mi]] = true;
+    for (mi = 0; mi < ownIds.length; mi++) idSet[ownIds[mi]] = true;
+    projectIds = Object.keys(idSet);
+    projectOwnerIds = {};
+    if (!projectIds.length) {
+      var fromCache = readSbStateCache(userId);
+      if (fromCache && fromCache.projects && fromCache.projects.length) {
+        var reb = JSON.parse(JSON.stringify(fromCache));
+        migrateStateObject(reb);
+        postLoadState(reb);
+        fixCurrentProjectPointer(reb);
+        persistSbStateCache(userId, reb);
+        scheduleSupabaseFlush();
+        return reb;
+      }
+      var empty = emptyState(displayName || activeAccount || "用户");
+      empty.userName = displayName || empty.userName;
+      empty.avatar = avatar;
+      empty.profileTitle = profileTitle;
+      empty.profileBio = profileBio;
+      return empty;
+    }
+    for (mi = 0; mi < ownIds.length; mi++) {
+      await sb.from("project_members").upsert(
+        { project_id: ownIds[mi], user_id: userId, role: "owner" },
+        { onConflict: "project_id,user_id" }
+      );
+    }
+    var projRes = await sb.from("projects").select("*").in("id", projectIds);
+    var projects = projRes.data || [];
+    var ownerIds = [];
+    var i;
+    for (i = 0; i < projects.length; i++) {
+      if (projects[i].owner_id) ownerIds.push(projects[i].owner_id);
+    }
+    var ownerNames = {};
+    if (ownerIds.length) {
+      var opRes = await sb.from("profiles").select("id, display_name").in("id", ownerIds);
+      (opRes.data || []).forEach(function (r) {
+        ownerNames[r.id] = r.display_name || "";
+      });
+    }
+    var stateProjects = [];
+    for (i = 0; i < projects.length; i++) {
+      var row = projects[i];
+      projectOwnerIds[row.id] = row.owner_id;
+      var pmRes = await sb.from("project_members").select("user_id, profiles(display_name)").eq("project_id", row.id);
+      var memberNames = [];
+      var seen = {};
+      (pmRes.data || []).forEach(function (m) {
+        var nm = m.profiles && m.profiles.display_name ? m.profiles.display_name : "";
+        if (nm && !seen[nm]) {
+          seen[nm] = true;
+          memberNames.push(nm);
+        }
+      });
+      var ownerName = ownerNames[row.owner_id] || "";
+      if (row.extra && row.extra.members && Array.isArray(row.extra.members)) {
+        for (var mi = 0; mi < row.extra.members.length; mi++) {
+          var mm = String(row.extra.members[mi] || "").trim();
+          if (mm && !seen[mm]) {
+            seen[mm] = true;
+            memberNames.push(mm);
+          }
+        }
+      }
+      if (row.extra && row.extra.owner) ownerName = row.extra.owner || ownerName;
+      var proj = {
+        id: row.id,
+        name: row.name,
+        archived: row.archived,
+        createdAt: row.created_at,
+        owner: ownerName,
+        members: memberNames.length ? memberNames : [ownerName || displayName],
+        pipelineStages: row.pipeline_stages && row.pipeline_stages.length ? row.pipeline_stages : ["流程"],
+        chainMode: !!row.chain_mode,
+      };
+      if (row.extra && typeof row.extra === "object") {
+        for (var exk in row.extra) {
+          if (exk === "members" || exk === "owner") continue;
+          proj[exk] = row.extra[exk];
+        }
+      }
+      stateProjects.push(proj);
+    }
+    var tasksRes = await sb.from("tasks").select("*").in("project_id", projectIds);
+    var taskRows = tasksRes.data || [];
+    var stateTasks = taskRows.map(taskFromRow);
+    var taskIds = stateTasks.map(function (t) {
+      return t.id;
+    });
+    var rels = [];
+    var coms = [];
+    if (taskIds.length) {
+      var rSeen = {};
+      function mergeRel(r) {
+        if (!r || rSeen[r.id]) return;
+        rSeen[r.id] = true;
+        rels.push({
+          id: r.id,
+          fromId: r.from_task_id,
+          toId: r.to_task_id,
+          kind: r.kind || "related",
+        });
+      }
+      var r1 = await sb.from("task_relations").select("*").in("from_task_id", taskIds);
+      var r2 = await sb.from("task_relations").select("*").in("to_task_id", taskIds);
+      (r1.data || []).forEach(mergeRel);
+      (r2.data || []).forEach(mergeRel);
+      var cRes = await sb.from("task_comments").select("*").in("task_id", taskIds);
+      (cRes.data || []).forEach(function (c) {
+        coms.push({
+          id: c.id,
+          taskId: c.task_id,
+          author: c.author || "",
+          body: c.body || "",
+          parentId: c.parent_id || null,
+          at: c.at || null,
+          createdAt: c.created_at,
+        });
+      });
+    }
+    var out = {
+      userName: displayName || activeAccount || "用户",
+      avatar: avatar,
+      profileTitle: profileTitle,
+      profileBio: profileBio,
+      currentProjectId: stateProjects[0] ? stateProjects[0].id : "",
+      view: "dashboard",
+      workspaceTab: "flow",
+      showFlowOverlay: false,
+      scheduleWeekOffset: 0,
+      scheduleProjectFilter: "",
+      projects: stateProjects,
+      tasks: stateTasks,
+      relations: rels,
+      comments: coms,
+    };
+    migrateStateObject(out);
+    postLoadState(out);
+    fixCurrentProjectPointer(out);
+    persistSbStateCache(userId, out);
+    return out;
+  }
+
+  async function flushSaveToSupabase() {
+    if (!useSupabaseMode() || !__sb || !state) return;
+    try {
+      var ures = await __sb.auth.getUser();
+      var uid = ures.data.user && ures.data.user.id;
+      if (!uid) return;
+      await __sb.from("profiles").upsert({
+        id: uid,
+        display_name: state.userName || "",
+        avatar: state.avatar || "👤",
+        profile_title: state.profileTitle || "",
+        profile_bio: state.profileBio || "",
+        updated_at: new Date().toISOString(),
+      });
+      var pi;
+      for (pi = 0; pi < state.projects.length; pi++) {
+        var p = state.projects[pi];
+        var ownerId = projectOwnerIds[p.id] || uid;
+        var extra = projectExtraFromProj(p);
+        extra.members = p.members || [];
+        extra.owner = p.owner || "";
+        await __sb.from("projects").upsert({
+          id: p.id,
+          owner_id: ownerId,
+          name: p.name,
+          archived: !!p.archived,
+          created_at: p.createdAt || new Date().toISOString(),
+          pipeline_stages: p.pipelineStages || [],
+          chain_mode: !!p.chainMode,
+          extra: extra,
+        });
+        projectOwnerIds[p.id] = ownerId;
+        var role = ownerId === uid ? "owner" : "member";
+        await __sb.from("project_members").upsert(
+          { project_id: p.id, user_id: uid, role: role },
+          { onConflict: "project_id,user_id" }
+        );
+      }
+      var ti;
+      for (ti = 0; ti < state.tasks.length; ti++) {
+        await __sb.from("tasks").upsert(taskRowFromTask(state.tasks[ti]));
+      }
+      for (pi = 0; pi < state.projects.length; pi++) {
+        var pid = state.projects[pi].id;
+        var want = state.tasks
+          .filter(function (t) {
+            return t.projectId === pid;
+          })
+          .map(function (t) {
+            return t.id;
+          });
+        var existRes = await __sb.from("tasks").select("id").eq("project_id", pid);
+        var ej = existRes.data || [];
+        for (var ei = 0; ei < ej.length; ei++) {
+          if (want.indexOf(ej[ei].id) === -1) {
+            await __sb.from("tasks").delete().eq("id", ej[ei].id);
+          }
+        }
+      }
+      var tids = state.tasks.map(function (t) {
+        return t.id;
+      });
+      if (tids.length) {
+        await __sb.from("task_relations").delete().in("from_task_id", tids);
+        await __sb.from("task_relations").delete().in("to_task_id", tids);
+        await __sb.from("task_comments").delete().in("task_id", tids);
+      }
+      for (var ri = 0; ri < state.relations.length; ri++) {
+        var rr = state.relations[ri];
+        if (tids.indexOf(rr.fromId) === -1 || tids.indexOf(rr.toId) === -1) continue;
+        await __sb.from("task_relations").upsert({
+          id: rr.id,
+          from_task_id: rr.fromId,
+          to_task_id: rr.toId,
+          kind: rr.kind || "related",
+        });
+      }
+      for (var ci = 0; ci < state.comments.length; ci++) {
+        var cc = state.comments[ci];
+        if (tids.indexOf(cc.taskId) === -1) continue;
+        await __sb.from("task_comments").upsert({
+          id: cc.id,
+          task_id: cc.taskId,
+          author: cc.author || "",
+          body: cc.body || "",
+          parent_id: cc.parentId || null,
+          at: cc.at || null,
+          created_at: cc.createdAt || new Date().toISOString(),
+        });
+      }
+      persistSbStateCache(uid, state);
+    } catch (e) {
+      console.error("Supabase save failed", e);
+    }
+  }
+
+  function scheduleSupabaseFlush() {
+    if (!useSupabaseMode() || !__sb || !activeAccount || !state) return;
+    if (__applyingRemoteSupabase) return;
+    if (__sbSaveTimer) clearTimeout(__sbSaveTimer);
+    __sbSaveTimer = setTimeout(function () {
+      __sbSaveTimer = null;
+      flushSaveToSupabase();
+    }, 450);
+  }
+
+  function disconnectSupabaseRealtime() {
+    if (__sbChannel && __sb) {
+      try {
+        __sb.removeChannel(__sbChannel);
+      } catch (e) {}
+      __sbChannel = null;
+    }
+  }
+
+  function connectSupabaseRealtime() {
+    if (!useSupabaseMode() || !__sb || !state) return;
+    disconnectSupabaseRealtime();
+    __sbChannel = __sb
+      .channel("workspace:" + String(activeAccount || "anon"))
+      .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, function () {
+        scheduleSupabaseReload();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "projects" }, function () {
+        scheduleSupabaseReload();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "project_members" }, function () {
+        scheduleSupabaseReload();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "task_relations" }, function () {
+        scheduleSupabaseReload();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "task_comments" }, function () {
+        scheduleSupabaseReload();
+      })
+      .subscribe();
+  }
+
+  function scheduleSupabaseReload() {
+    if (__applyingRemoteSupabase) return;
+    if (__sbReloadTimer) clearTimeout(__sbReloadTimer);
+    __sbReloadTimer = setTimeout(function () {
+      __sbReloadTimer = null;
+      if (!__sb || !activeAccount) return;
+      __sb.auth.getUser().then(function (res) {
+        var u = res.data.user;
+        if (!u) return;
+        __applyingRemoteSupabase = true;
+        return loadStateFromSupabase(u.id)
+          .then(function (s) {
+            if (s) {
+              state = s;
+              migrateStateObject(state);
+              postLoadState(state);
+              fixCurrentProjectPointer(state);
+              syncSavedSnapshotFromState(state);
+              render();
+            }
+          })
+          .finally(function () {
+            __applyingRemoteSupabase = false;
+          });
+      });
+    }, 400);
+  }
+
+  async function redeemInviteIfPresent() {
+    try {
+      var q = String(window.location.search || "");
+      var m = /[?&]invite=([^&]+)/.exec(q);
+      if (!m) return;
+      var token = decodeURIComponent(m[1]);
+      if (!token || !__sb) return;
+      await __sb.rpc("redeem_project_invite", { invite_token: token });
+      var url = window.location.pathname + window.location.hash;
+      window.history.replaceState({}, "", url);
+    } catch (e) {
+      console.warn("redeem invite", e);
+    }
+  }
+
+  async function applySupabaseUser(user) {
+    activeAccount = user.email || user.id;
+    setSession(activeAccount);
+    state = await loadStateFromSupabase(user.id);
+    if (
+      state &&
+      (!state.projects || !state.projects.length) &&
+      (!state.tasks || !state.tasks.length)
+    ) {
+      var c = readSbStateCache(user.id);
+      if (c && c.projects && c.projects.length) {
+        state = migrateStateObject(JSON.parse(JSON.stringify(c)));
+        postLoadState(state);
+        fixCurrentProjectPointer(state);
+        scheduleSupabaseFlush();
+      }
+    }
+    syncSavedSnapshotFromState(state);
+    applyRouteFromHash();
+    connectSupabaseRealtime();
+  }
+
+  async function bootstrapSupabase() {
+    __bootstrapError = "";
+    var el = document.getElementById("app");
+    if (el) {
+      el.innerHTML =
+        '<div style="padding:2.5rem 1rem;text-align:center;color:#64748b;font-size:14px">正在连接协作服务…</div>';
+    }
+    try {
+      await ensureSupabaseClient();
+      var session = await resolveSupabaseSession();
+      if (session && session.user) {
+        await redeemInviteIfPresent();
+        await applySupabaseUser(session.user);
+      } else {
+        activeAccount = null;
+        state = null;
+      }
+      render();
+    } catch (e) {
+      __bootstrapError = "协作服务不可用：" + (e && e.message ? e.message : String(e));
+      activeAccount = null;
+      state = null;
+      render();
+    }
+  }
+
+  function isValidEmail(s) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(s || "").trim());
   }
 
   function isPrivateLanHostname(h) {
@@ -806,11 +1459,16 @@
 
   function renderWelcomeBanner() {
     if (!activeAccount || isWelcomeBannerDismissed()) return "";
+    var hintLocal =
+      '<p class="muted" style="margin:0.25rem 0 0;font-size:12px">数据只在当前浏览器，换电脑需自行导出或分享码。</p>';
+    var hintCloud =
+      '<p class="muted" style="margin:0.25rem 0 0;font-size:12px">数据在 Supabase 云端，换设备登录同一邮箱即可同步。</p>';
     return (
       '<div class="welcome-banner card" id="welcome-banner">' +
       '<div class="wb-head">' +
       "<div><strong>第一次使用？按下面四步即可上手</strong>" +
-      '<p class="muted" style="margin:0.25rem 0 0;font-size:12px">数据只在当前浏览器，换电脑需自行导出或分享码。</p></div>' +
+      (useSupabaseMode() ? hintCloud : hintLocal) +
+      "</div>" +
       '<button type="button" class="btn btn-sm" id="welcome-dismiss" title="关闭后仍可在侧栏从「恢复示例」体验演示">知道了，收起</button>' +
       "</div>" +
       "<ol class=\"welcome-steps\">" +
@@ -1534,6 +2192,12 @@
       return;
     }
     if (json === __lastSavedStateJson) return;
+    if (useSupabaseMode()) {
+      __lastSavedStateJson = json;
+      if (__applyingRemoteSupabase) return;
+      scheduleSupabaseFlush();
+      return;
+    }
     try {
       localStorage.setItem(storageKeyForUser(activeAccount), json);
     } catch (e2) {}
@@ -1599,6 +2263,7 @@
 
   /** 本机多账号协作：按任务负责人/协作人（账号ID）自动把项目镜像到对方账号 */
   function syncCrossAccountProjectShares() {
+    if (useSupabaseMode()) return;
     if (!activeAccount || !state) return;
     var auth = loadAuth();
     var users = auth.accounts.map(function (a) { return a.username; });
@@ -2125,6 +2790,16 @@
         __socket.emit("unsubscribe_project", pid);
       } catch (e) {}
     }
+    if (useSupabaseMode() && __sb) {
+      __sb
+        .from("projects")
+        .delete()
+        .eq("id", pid)
+        .catch(function (e) {
+          console.error(e);
+        });
+    }
+    delete projectOwnerIds[pid];
     save(state);
     return true;
   }
@@ -2716,6 +3391,10 @@
 
   function bootstrap() {
     __bootstrapError = "";
+    if (useSupabaseMode()) {
+      bootstrapSupabase();
+      return;
+    }
     var el = document.getElementById("app");
     if (useServerStorage() && el) {
       el.innerHTML =
@@ -3885,8 +4564,15 @@
   }
 
   function parseMeetingTextWithAI(text, done) {
-    if (!useServerStorage()) {
-      done({ err: "AI 解析仅在线模式可用（需登录且服务器配置 OPENAI_API_KEY）" });
+    if (!canUseAiMeetingParse()) {
+      done({ err: "AI 已禁用（页面设置了 DISABLE_MEETING_AI）。" });
+      return;
+    }
+    if (!meetingAiApiBase()) {
+      done({
+        err:
+          "未配置会议纪要 AI 服务地址。请在页面脚本中设置 WORKGRAPH_AI_PARSE_ORIGIN_FALLBACK，或执行：localStorage.setItem(\"workgraph_ai_api_base\",\"https://你的域名\")",
+      });
       return;
     }
     var txtAi = trimChatGptMeetingPreamble(String(text || ""));
@@ -3894,7 +4580,7 @@
       done({ err: "正文在去前言后为空，请保留至少含「任务1：」或「#」标题的排期段落。" });
       return;
     }
-    apiFetch("/api/ai/parse-meeting", { method: "POST", body: { text: txtAi } })
+    meetingAiFetch("/api/ai/parse-meeting", { method: "POST", body: { text: txtAi } })
       .then(function (r) {
         return r.text().then(function (bodyText) {
           var j = null;
@@ -3914,7 +4600,7 @@
         if (!res.ok && res.status === 404) {
           done({
             err:
-              "API 不存在（404）。请确认：① 已在运行 task-server（项目目录下 npm start，默认端口 3780）；② 尽量用同一地址打开页面，例如 http://127.0.0.1:3780/ ；③ 若页面与 API 不同机或不同端口，在控制台执行：localStorage.setItem(\"workgraph_api_base\",\"http://你的主机:3780\") 后刷新；④ 局域网访问需 task-server 监听 0.0.0.0（本机已支持）。",
+              "API 不存在（404）。请确认：① Vercel 等公网部署已包含 /api/ai/parse-meeting；② 本地已运行 task-server（默认 3780）且页面与 API 同址；③ 若端口不一致，可执行：localStorage.setItem(\"workgraph_api_base\",\"http://主机:端口\") 后刷新。",
           });
           return;
         }
@@ -3934,7 +4620,7 @@
           err:
             "请求失败（" +
             hint +
-            "）。请确认：① 通过 http(s) 打开本页且 task-server 已启动；② 地址栏主机与登录时一致（勿混用 localhost 与 127.0.0.1）；③ 已 export OPENAI_API_KEY 并重启服务。",
+            "）。请确认：① 通过 http(s) 打开；② 公网部署已在服务端配置 OPENAI_API_KEY；③ 本地 task-server 已启动且 OPENAI_API_KEY 已设置。",
         });
       });
   }
@@ -4080,11 +4766,12 @@
         '<label><input type="checkbox" id="meet-chain" /> 新建为<strong>串联</strong>项目（任务依次衔接，无阶段列）</label>' +
         '<label><input type="checkbox" id="meet-infer" checked /> 根据正文自动识别「串联」等关键词（仅新建时生效）</label>' +
         '<label><input type="checkbox" id="meet-stages" /> 追加到已有时：用文中「阶段：」<strong>覆盖</strong>该项目的流程阶段</label></div></div>' +
-        (useServerStorage()
+        (canUseAiMeetingParse()
           ? '<div class="row"><label>解析方式</label><div style="display:flex;flex-direction:column;gap:0.4rem;font-size:13px">' +
-            '<label style="cursor:pointer"><input type="radio" name="meet-parse" id="meet-parse-rules" value="rules" checked /> <strong>智能规则</strong>（本地，分块/续行/表格）</label>' +
-            '<label style="cursor:pointer"><input type="radio" name="meet-parse" id="meet-parse-ai" value="ai" /> <strong>AI 结构化</strong>（服务端 OpenAI，需环境变量 OPENAI_API_KEY）</label></div></div>'
-          : '<div class="row"><label>解析方式</label><span class="muted" style="font-size:12px">本机打开：仅「智能规则」。通过 http 访问且服务器配置密钥后可使用 AI。</span></div>') +
+            '<label style="cursor:pointer"><input type="radio" name="meet-parse" id="meet-parse-rules" value="rules" /> <strong>智能规则</strong>（本地，分块/续行/表格）</label>' +
+            '<label style="cursor:pointer"><input type="radio" name="meet-parse" id="meet-parse-ai" value="ai" checked /> <strong>AI 结构化</strong>（服务端 OpenAI，需环境变量 OPENAI_API_KEY）</label></div>' +
+            '<p class="muted" style="margin:0.35rem 0 0;font-size:11px;line-height:1.45">默认优先「AI 结构化」（任意设备）；失败时自动改用智能规则。预览首行标明当前方式。</p></div>'
+          : '<div class="row"><label>解析方式</label><span class="muted" style="font-size:12px">当前环境仅「智能规则」。如本机 file:// 打开，可先在控制台执行 localStorage.setItem("workgraph_api_base","https://你的域名") 后刷新，再使用 AI。</span></div>') +
         '<pre id="meet-pre" class="muted" style="white-space:pre-wrap;max-height:160px;overflow:auto;font-size:11px;margin:0.65rem 0;padding:0.55rem;background:#f8fafc;border:1px solid var(--border);border-radius:8px">点击「预览解析」查看识别结果</pre>' +
         '<div class="flex" style="justify-content:flex-end;gap:0.5rem;flex-wrap:wrap">' +
         '<button type="button" class="btn" id="meet-cancel">取消</button>' +
@@ -4110,10 +4797,11 @@
     var elParseAi = document.getElementById("meet-parse-ai");
     function runMeetingParse(callback) {
       var txt = (ta && ta.value) || "";
-      if (useServerStorage() && elParseAi && elParseAi.checked) {
+      if (canUseAiMeetingParse() && elParseAi && elParseAi.checked) {
         parseMeetingTextWithAI(txt, function (res) {
           if (res.err) {
-            callback(null, res.err);
+            var local = parseMeetingText(txt);
+            callback(local, { aiFallback: true, detail: res.err });
             return;
           }
           callback(res.parsed, null);
@@ -4123,14 +4811,25 @@
       callback(parseMeetingText(txt), null);
     }
     function doPreview() {
-      if (useServerStorage() && elParseAi && elParseAi.checked && pre) {
+      if (canUseAiMeetingParse() && elParseAi && elParseAi.checked && pre) {
         pre.textContent = "正在请求 AI 解析，请稍候…";
+      } else if (pre) {
+        pre.textContent = "正在本地解析（智能规则），请稍候…";
       }
       runMeetingParse(function (parsed, err) {
         if (pre) {
-          if (err) pre.textContent = "解析失败：" + err;
-          else if (parsed) pre.textContent = formatMeetingPreview(parsed);
-          else pre.textContent = "（无结果）";
+          if (err && typeof err === "object" && err.aiFallback) {
+            pre.textContent =
+              "【智能规则（AI 不可用，已自动改用）】\n" +
+              (err.detail ? "原因：" + err.detail + "\n\n" : "") +
+              formatMeetingPreview(parsed);
+            return;
+          }
+          var useAi = canUseAiMeetingParse() && elParseAi && elParseAi.checked;
+          var tag = useAi ? "【AI 结构化】" : "【智能规则】";
+          if (typeof err === "string") pre.textContent = tag + "\n解析失败：" + err;
+          else if (parsed) pre.textContent = tag + "\n" + formatMeetingPreview(parsed);
+          else pre.textContent = tag + "\n（无结果）";
         }
       });
     }
@@ -4138,7 +4837,7 @@
     document.getElementById("meet-preview").onclick = doPreview;
     document.getElementById("meet-apply").onclick = function () {
       runMeetingParse(function (parsed, err) {
-        if (err) {
+        if (typeof err === "string") {
           alert(err);
           return;
         }
@@ -4234,9 +4933,12 @@
   }
 
   function renderAuthScreen() {
-    var storeHint = useServerStorage()
+    var storeHint = useSupabaseMode()
+      ? '<p class="muted" style="margin:0 0 1rem;font-size:13px">当前为<strong>Supabase 协作模式</strong>：请使用<strong>邮箱</strong>注册/登录；数据存储在 Supabase，多设备与项目成员实时同步（需在控制台启用 Realtime）。</p>'
+      : useServerStorage()
       ? '<p class="muted" style="margin:0 0 1rem;font-size:13px">当前为<strong>在线模式</strong>：账号与任务数据保存在<strong>服务器</strong>，多人可同时访问本站，各自使用独立账号登录。</p>'
       : '<p class="muted" style="margin:0 0 1rem;font-size:13px">登录或注册后，任务与项目数据按<strong>账号</strong>存在本机浏览器（localStorage）。密码经 SHA-256 哈希后仅存本地，无远程服务器验证。</p>';
+    var userLabel = useSupabaseMode() ? "邮箱" : "用户名";
     var bootErr =
       __bootstrapError &&
       '<div class="notice" style="margin-bottom:0.75rem">' + esc(__bootstrapError) + "</div>";
@@ -4250,7 +4952,11 @@
       "<li>默认进「工作台」看概览；进「项目」打开任务流程，点方块编辑</li>" +
       "<li>「日程」看本周截止；「工作台」看分配给你的事</li>" +
       "<li>" +
-      (useServerStorage() ? "在线模式下数据在服务器；也可直接打开本地 html 文件使用本机存储。" : "数据仅存本机；可「恢复示例」体验演示") +
+      (useSupabaseMode()
+        ? "需通过 http(s) 访问本页以加载协作 SDK；数据在 Supabase。"
+        : useServerStorage()
+        ? "在线模式下数据在服务器；也可直接打开本地 html 文件使用本机存储。"
+        : "数据仅存本机；可「恢复示例」体验演示") +
       "</li></ul>" +
       storeHint +
       '<div class="auth-tabs">' +
@@ -4259,7 +4965,11 @@
       "</div>" +
       '<div id="auth-msg" class="auth-msg"></div>' +
       '<div id="auth-panel-in">' +
-      '<div class="row"><label>用户名</label><input class="input" id="auth-in-user" autocomplete="username" /></div>' +
+      '<div class="row"><label>' +
+      userLabel +
+      '</label><input class="input" id="auth-in-user" autocomplete="username" placeholder="' +
+      (useSupabaseMode() ? "you@example.com" : "") +
+      '" /></div>' +
       '<div class="row"><label>密码</label><input type="password" class="input" id="auth-in-pass" autocomplete="current-password" /></div>' +
       '<div class="flex" style="margin-top:0.75rem;justify-content:flex-end">' +
       '<button type="button" class="btn btn-primary" id="auth-btn-in">登录</button></div>' +
@@ -4271,7 +4981,11 @@
       esc(DEMO_AUTH_PASS) +
       "</span></div></div>" +
       '<div id="auth-panel-up" class="hidden">' +
-      '<div class="row"><label>用户名</label><input class="input" id="auth-up-user" autocomplete="username" /></div>' +
+      '<div class="row"><label>' +
+      userLabel +
+      '</label><input class="input" id="auth-up-user" autocomplete="username" placeholder="' +
+      (useSupabaseMode() ? "you@example.com" : "") +
+      '" /></div>' +
       '<div class="row"><label>密码</label><input type="password" class="input" id="auth-up-pass" autocomplete="new-password" /></div>' +
       '<div class="row"><label>确认密码</label><input type="password" class="input" id="auth-up-pass2" autocomplete="new-password" /></div>' +
       '<div class="flex" style="margin-top:0.75rem;justify-content:flex-end">' +
@@ -4312,6 +5026,39 @@
         u = u.trim();
         var pw = (document.getElementById("auth-in-pass") && document.getElementById("auth-in-pass").value) || "";
         setMsg("");
+        if (useSupabaseMode()) {
+          if (!isValidEmail(u)) {
+            setMsg("请输入有效邮箱");
+            return;
+          }
+          if (pw.length < 6) {
+            setMsg("密码至少 6 位");
+            return;
+          }
+          setMsg("正在登录…");
+          ensureSupabaseClient()
+            .then(function () {
+              return __sb.auth.signInWithPassword({ email: u, password: pw });
+            })
+            .then(function (res) {
+              if (!res || res.error) {
+                setMsg((res && res.error && res.error.message) || "登录失败");
+                return null;
+              }
+              return __sb.auth.getUser();
+            })
+            .then(function (ur) {
+              if (!ur || !ur.data || !ur.data.user) return;
+              return applySupabaseUser(ur.data.user);
+            })
+            .then(function () {
+              if (activeAccount && state) render();
+            })
+            .catch(function (e) {
+              setMsg((e && e.message) || "登录失败");
+            });
+          return;
+        }
         if (u.length < 2) {
           setMsg("用户名至少 2 个字符");
           return;
@@ -4383,6 +5130,10 @@
     var btnDemo = document.getElementById("auth-btn-demo");
     if (btnDemo) {
       btnDemo.onclick = function () {
+        if (useSupabaseMode()) {
+          setMsg("Supabase 模式请使用邮箱注册或登录，不使用本地演示账号。");
+          return;
+        }
         setMsg("正在登录演示账号…");
         if (useServerStorage()) {
           apiFetch("/api/login", { method: "POST", body: { username: DEMO_AUTH_USER, password: DEMO_AUTH_PASS } })
@@ -4477,6 +5228,47 @@
         var pw = (document.getElementById("auth-up-pass") && document.getElementById("auth-up-pass").value) || "";
         var pw2 = (document.getElementById("auth-up-pass2") && document.getElementById("auth-up-pass2").value) || "";
         setMsg("");
+        if (useSupabaseMode()) {
+          if (!isValidEmail(u)) {
+            setMsg("请输入有效邮箱");
+            return;
+          }
+          if (pw.length < 6) {
+            setMsg("密码至少 6 位");
+            return;
+          }
+          if (pw !== pw2) {
+            setMsg("两次密码不一致");
+            return;
+          }
+          setMsg("正在注册…");
+          ensureSupabaseClient()
+            .then(function () {
+              return __sb.auth.signUp({
+                email: u,
+                password: pw,
+                options: { data: { display_name: String(u).split("@")[0] || u } },
+              });
+            })
+            .then(function (res) {
+              if (!res || res.error) {
+                setMsg((res && res.error && res.error.message) || "注册失败");
+                return null;
+              }
+              if (res.data && res.data.session && res.data.user) {
+                return applySupabaseUser(res.data.user);
+              }
+              setMsg("注册成功。若项目启用了邮箱验证，请查收邮件后登录。");
+              return null;
+            })
+            .then(function () {
+              if (activeAccount && state) render();
+            })
+            .catch(function (e) {
+              setMsg((e && e.message) || "注册失败");
+            });
+          return;
+        }
         if (u.length < 2) {
           setMsg("用户名至少 2 个字符");
           return;
@@ -5874,6 +6666,57 @@
           __rtPushTimer = null;
         }
         if (state) save(state);
+        if (useSupabaseMode()) {
+          if (__sbSaveTimer) {
+            clearTimeout(__sbSaveTimer);
+            __sbSaveTimer = null;
+          }
+          disconnectSupabaseRealtime();
+          var p = flushSaveToSupabase();
+          function finishSupabaseLogout() {
+            if (__sb) {
+              __sb.auth
+                .getSession()
+                .then(function (r) {
+                  var u = r.data.session && r.data.session.user && r.data.session.user.id;
+                  if (u) clearSbStateCache(u);
+                })
+                .catch(function () {})
+                .finally(function () {
+                  __sb.auth.signOut().catch(function () {});
+                  clearSession();
+                  clearWorkgraphBearer();
+                  activeAccount = null;
+                  state = null;
+                  syncSavedSnapshotFromState(null);
+                  __hashLock = true;
+                  location.hash = "";
+                  setTimeout(function () {
+                    __hashLock = false;
+                  }, 0);
+                  render();
+                });
+            } else {
+              clearSession();
+              clearWorkgraphBearer();
+              activeAccount = null;
+              state = null;
+              syncSavedSnapshotFromState(null);
+              __hashLock = true;
+              location.hash = "";
+              setTimeout(function () {
+                __hashLock = false;
+              }, 0);
+              render();
+            }
+          }
+          if (p && typeof p.then === "function") {
+            p.catch(function () {}).finally(finishSupabaseLogout);
+          } else {
+            finishSupabaseLogout();
+          }
+          return;
+        }
         if (useServerStorage()) {
           if (__serverSaveTimer) {
             clearTimeout(__serverSaveTimer);

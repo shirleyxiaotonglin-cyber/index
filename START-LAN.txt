@@ -1,0 +1,60 @@
+刷新后任务/项目变空（Supabase）
+--------------------------------
+多为数据库 RLS 策略导致：仅 project_members 可读时，若 owner 未写入成员表会读不到数据。
+请在 Supabase SQL Editor 执行仓库内：supabase/fix_rls_owner_access.sql
+
+
+端口被占用 Address already in use
+----------------------------------
+若报错 OSError: [Errno 48] Address already in use，说明 8080 已被占用（常是之前开的 python 服务未关）。
+
+终端执行：
+  lsof -nP -iTCP:8080 -sTCP:LISTEN
+看到 PID 后：
+  kill <PID>
+然后再 ./serve-lan.sh
+
+或换端口（无需杀进程）：
+  PORT=8081 ./serve-lan.sh
+注意换端口后，Supabase Redirect URLs 里也要改成 http://局域网IP:8081/**
+
+
+局域网：其他设备打不开 http://127.0.0.1:8080 怎么办
+================================================
+
+原因
+----
+127.0.0.1 和 localhost 只表示「这一台电脑自己」。
+手机、平板、另一台电脑必须用「这台 Mac 在局域网里的 IP」，一般是 192.168.x.x。
+
+
+正确做法（Mac）
+----------------
+1. 打开「终端」，进入本仓库目录，例如：
+   cd /Users/你的用户名/Desktop/cursor
+
+2. 给脚本执行权限（只需做一次）：
+   chmod +x serve-lan.sh
+
+3. 启动服务（监听所有网卡，其他设备才能连）：
+   ./serve-lan.sh
+
+4. 终端里会打印多行地址，请用手机/其他电脑浏览器打开其中
+   http://192.168.x.x:8080/index.html
+   不要用 127.0.0.1 那一行给别的设备用。
+
+5. 若仍无法访问：
+   - 确认手机与电脑连接的是同一个 Wi‑Fi。
+   - 系统设置 → 网络 → 防火墙：允许「python3」或「传入连接」。
+   - 公司/校园网可能禁止设备互访，可换手机热点测试。
+
+使用 Supabase 登录时
+--------------------
+在 Supabase 控制台：
+Authentication → URL 配置（或 Redirect URLs）
+
+把下面形式的地址加进去（IP 与端口与终端里打印的一致）：
+  http://192.168.1.10:8080/**
+（可把 192.168.1.10 换成你 Mac 的真实局域网 IP）
+
+否则在手机上可能出现登录失败、验证邮件跳转失败等问题。

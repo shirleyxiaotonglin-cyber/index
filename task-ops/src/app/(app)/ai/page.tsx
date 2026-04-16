@@ -37,7 +37,10 @@ function AiInner() {
           title: title?.trim() || undefined,
         }),
       });
-      if (!r.ok) throw new Error("failed");
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error((err as { error?: string }).error || `请求失败 ${r.status}`);
+      }
       return r.json() as Promise<{ result: unknown }>;
     },
     onSuccess: (data, variables) => {
@@ -73,7 +76,8 @@ function AiInner() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">AI 控制中心</h1>
         <p className="text-sm text-muted-foreground">
-          日报/周报、项目总结、风险预测、负载与任务拆解（规则引擎，可替换为 LLM）
+          配置环境变量 <code className="rounded bg-muted px-1">OPENAI_API_KEY</code> 后，由{" "}
+          <strong>gpt-4o-mini</strong> 生成；未配置时自动使用规则引擎。
         </p>
       </div>
 

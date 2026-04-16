@@ -3,14 +3,21 @@ import { prisma } from "@/lib/db";
 import { requireUser, getProjectRole } from "@/lib/api-context";
 import { taskVisibilityWhere } from "@/lib/task-access";
 import {
-  buildDailyReport,
   buildRiskAnalysis,
   buildTaskSummary,
-  buildWeeklyReport,
-  buildProjectDeepSummary,
-  buildDecomposeSuggestion,
-  buildRiskPredict,
 } from "@/lib/ai-mock";
+import {
+  llmTaskSummary,
+  llmDecompose,
+  llmDailyReport,
+  llmWeeklyReport,
+  llmProjectSummary,
+  llmProjectDeep,
+  llmRisk,
+  llmRiskPredict,
+  llmWorkloadResult,
+} from "@/lib/ai-llm";
+import { openaiChatCompletionText } from "@/lib/openai";
 import { z } from "zod";
 
 const bodySchema = z.object({
@@ -31,10 +38,34 @@ const bodySchema = z.object({
 });
 
 export async function POST(req: Request) {
+  const json = await req.json().catch(() => null);
+
+  // 新接口：{ prompt: string } → { result: string }（与 kind 体系互斥）
+  if (
+    json &&
+    typeof json === "object" &&
+    typeof (json as { prompt?: unknown }).prompt === "string" &&
+    !("kind" in json)
+  ) {
+    const user = await requireUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (!process.env.OPENAI_API_KEY?.trim()) {
+      return NextResponse.json({ error: "OPENAI_API_KEY not configured" }, { status: 503 });
+    }
+    try {
+      const result = await openaiChatCompletionText((json as { prompt: string }).prompt);
+      return NextResponse.json({ result });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return NextResponse.json({ error: msg }, { status: 500 });
+    }
+  }
+
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const json = await req.json().catch(() => null);
   const parsed = bodySchema.safeParse(json);
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
@@ -50,13 +81,15 @@ export async function POST(req: Request) {
     const where = taskVisibilityWhere(task.projectId, user.id, user.globalRole, role);
     const ok = await prisma.task.findFirst({ where: { AND: [{ id: taskId }, where] } });
     if (!ok) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    return NextResponse.json({ result: buildTaskSummary(task) });
+    const result = await llmTaskSummary(task);
+    return NextResponse.json({ result });
   }
 
   if (kind === "decompose") {
     const t = (title || "").trim();
     if (!t) return NextResponse.json({ error: "title required" }, { status: 400 });
-    return NextResponse.json({ result: buildDecomposeSuggestion(t) });
+    const result = await llmDecompose(t);
+    return NextResponse.json({ result });
   }
 
   if (!projectId) {
@@ -74,31 +107,31 @@ export async function POST(req: Request) {
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   if (kind === "daily") {
-    return NextResponse.json({ result: buildDailyReport(project, tasks) });
+    const result = await llmDailyReport(project, tasks);
+    return NextResponse.json({ result });
   }
   if (kind === "weekly") {
-    return NextResponse.json({ result: buildWeeklyReport(project, tasks) });
+    const result = await llmWeeklyReport(project, tasks);
+    return NextResponse.json({ result });
   }
   if (kind === "project") {
     const done = tasks.filter((t) => t.status === "done").length;
     const rate = tasks.length ? Math.round((done / tasks.length) * 1000) / 10 : 0;
-    return NextResponse.json({
-      result: {
-        title: `${project.name} — 项目总结`,
-        completion: rate,
-        risk: buildRiskAnalysis(tasks),
-        narrative: `共 ${tasks.length} 项任务，完成率 ${rate}%。`,
-      },
-    });
+    const risk = buildRiskAnalysis(tasks);
+    const result = await llmProjectSummary(project, tasks, rate, risk);
+    return NextResponse.json({ result });
   }
   if (kind === "project_deep") {
-    return NextResponse.json({ result: buildProjectDeepSummary(project, tasks) });
+    const result = await llmProjectDeep(project, tasks);
+    return NextResponse.json({ result });
   }
   if (kind === "risk") {
-    return NextResponse.json({ result: buildRiskAnalysis(tasks) });
+    const result = await llmRisk(tasks);
+    return NextResponse.json({ result });
   }
   if (kind === "risk_predict") {
-    return NextResponse.json({ result: buildRiskPredict(tasks) });
+    const result = await llmRiskPredict(tasks);
+    return NextResponse.json({ result });
   }
   if (kind === "workload") {
     const byAssignee = await prisma.task.groupBy({
@@ -108,16 +141,16 @@ export async function POST(req: Request) {
     });
     const sorted = [...byAssignee].sort((a, b) => b._count._all - a._count._all);
     const overload = sorted.filter((x) => x._count._all >= 5);
-    return NextResponse.json({
-      result: {
-        distribution: sorted.map((s) => ({ assigneeId: s.assigneeId, open: s._count._all })),
-        overload,
-        suggestion:
-          overload.length > 0
-            ? "部分成员待办较多，建议平衡或拆分任务。"
-            : "负载相对均衡。",
-      },
-    });
+    const baseResult = {
+      distribution: sorted.map((s) => ({ assigneeId: s.assigneeId, open: s._count._all })),
+      overload,
+      suggestion:
+        overload.length > 0
+          ? "部分成员待办较多，建议平衡或拆分任务。"
+          : "负载相对均衡。",
+    };
+    const result = await llmWorkloadResult(baseResult);
+    return NextResponse.json({ result });
   }
 
   return NextResponse.json({ error: "Unknown" }, { status: 400 });

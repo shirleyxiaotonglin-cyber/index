@@ -3,6 +3,8 @@
 <head>
   <script>
     window.API_BASE = "";
+    window.WORKGRAPH_AI_PARSE_ORIGIN = "";
+    window.WORKGRAPH_AI_PARSE_ORIGIN_FALLBACK = "https://index-ecru-iota.vercel.app";
   </script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -573,6 +575,80 @@
     } catch (e) {
       return false;
     }
+  }
+
+  /**
+   * 是否展示「AI 结构化」：默认全开（任意设备）；仅 window.DISABLE_MEETING_AI === true 时关闭。
+   */
+  function canUseAiMeetingParse() {
+    if (useServerStorage()) return true;
+    try {
+      if (typeof window.DISABLE_MEETING_AI === "boolean" && window.DISABLE_MEETING_AI) return false;
+    } catch (e) {}
+    return true;
+  }
+
+  /**
+   * 会议纪要 AI 请求的 API 根：WORKGRAPH_AI_PARSE_ORIGIN → localStorage workgraph_ai_api_base → apiBase() →
+   * 同源相对路径 "" → WORKGRAPH_AI_PARSE_ORIGIN_FALLBACK。
+   */
+  function meetingAiApiBase() {
+    try {
+      if (typeof window.WORKGRAPH_AI_PARSE_ORIGIN === "string") {
+        var w = window.WORKGRAPH_AI_PARSE_ORIGIN.trim();
+        if (w.length) return w.replace(/\/$/, "");
+      }
+    } catch (e0) {}
+    try {
+      var la = localStorage.getItem("workgraph_ai_api_base");
+      if (la && String(la).trim()) return String(la).trim().replace(/\/$/, "");
+    } catch (e1) {}
+    var ab = apiBase();
+    if (ab) return ab;
+    try {
+      var p = location.protocol;
+      if (p === "http:" || p === "https:") return "";
+    } catch (e2) {}
+    try {
+      var fb =
+        typeof window.WORKGRAPH_AI_PARSE_ORIGIN_FALLBACK === "string"
+          ? window.WORKGRAPH_AI_PARSE_ORIGIN_FALLBACK.trim()
+          : "";
+      if (fb.length) return fb.replace(/\/$/, "");
+    } catch (e3) {}
+    return "";
+  }
+
+  /** 仅用于 /api/ai/parse-meeting；跨域时 credentials 用 omit */
+  function meetingAiFetch(path, opts) {
+    opts = opts || {};
+    var base = meetingAiApiBase();
+    var url = (base ? base : "") + path;
+    var cross = false;
+    try {
+      cross = !!(base && new URL(base).origin !== window.location.origin);
+    } catch (e) {
+      cross = !!base;
+    }
+    if (cross) opts.credentials = "omit";
+    else {
+      opts.credentials = "include";
+      opts.headers = opts.headers || {};
+      try {
+        if (path.indexOf("/api/") === 0) {
+          var wb = localStorage.getItem("workgraph_bearer_token");
+          if (wb && String(wb).trim()) {
+            opts.headers["Authorization"] = "Bearer " + String(wb).trim();
+          }
+        }
+      } catch (e2) {}
+    }
+    opts.headers = opts.headers || {};
+    if (opts.body != null && typeof opts.body === "object" && !(opts.body instanceof FormData)) {
+      opts.headers["Content-Type"] = "application/json";
+      opts.body = JSON.stringify(opts.body);
+    }
+    return fetch(url, opts);
   }
 
   function isPrivateLanHostname(h) {
@@ -3883,8 +3959,15 @@
   }
 
   function parseMeetingTextWithAI(text, done) {
-    if (!useServerStorage()) {
-      done({ err: "AI 解析仅在线模式可用（需登录且服务器配置 OPENAI_API_KEY）" });
+    if (!canUseAiMeetingParse()) {
+      done({ err: "AI 已禁用（页面设置了 DISABLE_MEETING_AI）。" });
+      return;
+    }
+    if (!meetingAiApiBase()) {
+      done({
+        err:
+          "未配置会议纪要 AI 服务地址。请在页面脚本中设置 WORKGRAPH_AI_PARSE_ORIGIN_FALLBACK，或执行：localStorage.setItem(\"workgraph_ai_api_base\",\"https://你的域名\")",
+      });
       return;
     }
     var txtAi = trimChatGptMeetingPreamble(String(text || ""));
@@ -3892,7 +3975,7 @@
       done({ err: "正文在去前言后为空，请保留至少含「任务1：」或「#」标题的排期段落。" });
       return;
     }
-    apiFetch("/api/ai/parse-meeting", { method: "POST", body: { text: txtAi } })
+    meetingAiFetch("/api/ai/parse-meeting", { method: "POST", body: { text: txtAi } })
       .then(function (r) {
         return r.text().then(function (bodyText) {
           var j = null;
@@ -4078,11 +4161,12 @@
         '<label><input type="checkbox" id="meet-chain" /> 新建为<strong>串联</strong>项目（任务依次衔接，无阶段列）</label>' +
         '<label><input type="checkbox" id="meet-infer" checked /> 根据正文自动识别「串联」等关键词（仅新建时生效）</label>' +
         '<label><input type="checkbox" id="meet-stages" /> 追加到已有时：用文中「阶段：」<strong>覆盖</strong>该项目的流程阶段</label></div></div>' +
-        (useServerStorage()
+        (canUseAiMeetingParse()
           ? '<div class="row"><label>解析方式</label><div style="display:flex;flex-direction:column;gap:0.4rem;font-size:13px">' +
-            '<label style="cursor:pointer"><input type="radio" name="meet-parse" id="meet-parse-rules" value="rules" checked /> <strong>智能规则</strong>（本地，分块/续行/表格）</label>' +
-            '<label style="cursor:pointer"><input type="radio" name="meet-parse" id="meet-parse-ai" value="ai" /> <strong>AI 结构化</strong>（服务端 OpenAI，需环境变量 OPENAI_API_KEY）</label></div></div>'
-          : '<div class="row"><label>解析方式</label><span class="muted" style="font-size:12px">本机打开：仅「智能规则」。通过 http 访问且服务器配置密钥后可使用 AI。</span></div>') +
+            '<label style="cursor:pointer"><input type="radio" name="meet-parse" id="meet-parse-rules" value="rules" /> <strong>智能规则</strong>（本地，分块/续行/表格）</label>' +
+            '<label style="cursor:pointer"><input type="radio" name="meet-parse" id="meet-parse-ai" value="ai" checked /> <strong>AI 结构化</strong>（服务端 OpenAI，需环境变量 OPENAI_API_KEY）</label></div>' +
+            '<p class="muted" style="margin:0.35rem 0 0;font-size:11px;line-height:1.45">默认优先「AI 结构化」（任意设备）；失败时自动改用智能规则。预览首行标明当前方式。</p></div>'
+          : '<div class="row"><label>解析方式</label><span class="muted" style="font-size:12px">当前环境仅「智能规则」。如本机 file:// 打开，可先在控制台执行 localStorage.setItem(\"workgraph_api_base\",\"https://你的域名\") 后刷新，再使用 AI。</span></div>') +
         '<pre id="meet-pre" class="muted" style="white-space:pre-wrap;max-height:160px;overflow:auto;font-size:11px;margin:0.65rem 0;padding:0.55rem;background:#f8fafc;border:1px solid var(--border);border-radius:8px">点击「预览解析」查看识别结果</pre>' +
         '<div class="flex" style="justify-content:flex-end;gap:0.5rem;flex-wrap:wrap">' +
         '<button type="button" class="btn" id="meet-cancel">取消</button>' +
@@ -4108,10 +4192,11 @@
     var elParseAi = document.getElementById("meet-parse-ai");
     function runMeetingParse(callback) {
       var txt = (ta && ta.value) || "";
-      if (useServerStorage() && elParseAi && elParseAi.checked) {
+      if (canUseAiMeetingParse() && elParseAi && elParseAi.checked) {
         parseMeetingTextWithAI(txt, function (res) {
           if (res.err) {
-            callback(null, res.err);
+            var local = parseMeetingText(txt);
+            callback(local, { aiFallback: true, detail: res.err });
             return;
           }
           callback(res.parsed, null);
@@ -4121,14 +4206,25 @@
       callback(parseMeetingText(txt), null);
     }
     function doPreview() {
-      if (useServerStorage() && elParseAi && elParseAi.checked && pre) {
+      if (canUseAiMeetingParse() && elParseAi && elParseAi.checked && pre) {
         pre.textContent = "正在请求 AI 解析，请稍候…";
+      } else if (pre) {
+        pre.textContent = "正在本地解析（智能规则），请稍候…";
       }
       runMeetingParse(function (parsed, err) {
         if (pre) {
-          if (err) pre.textContent = "解析失败：" + err;
-          else if (parsed) pre.textContent = formatMeetingPreview(parsed);
-          else pre.textContent = "（无结果）";
+          if (err && typeof err === "object" && err.aiFallback) {
+            pre.textContent =
+              "【智能规则（AI 不可用，已自动改用）】\n" +
+              (err.detail ? "原因：" + err.detail + "\n\n" : "") +
+              formatMeetingPreview(parsed);
+            return;
+          }
+          var useAi = canUseAiMeetingParse() && elParseAi && elParseAi.checked;
+          var tag = useAi ? "【AI 结构化】" : "【智能规则】";
+          if (typeof err === "string") pre.textContent = tag + "\n解析失败：" + err;
+          else if (parsed) pre.textContent = tag + "\n" + formatMeetingPreview(parsed);
+          else pre.textContent = tag + "\n（无结果）";
         }
       });
     }
@@ -4136,7 +4232,7 @@
     document.getElementById("meet-preview").onclick = doPreview;
     document.getElementById("meet-apply").onclick = function () {
       runMeetingParse(function (parsed, err) {
-        if (err) {
+        if (typeof err === "string") {
           alert(err);
           return;
         }

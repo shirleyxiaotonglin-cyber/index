@@ -119,8 +119,13 @@ export function TaskDrawer({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ kind: "task_summary", taskId }),
       });
-      const j = await r.json();
-      setAi(j.result);
+      const j = (await r.json()) as { result?: typeof ai; error?: string };
+      if (!r.ok) throw new Error(j.error || `AI 请求失败 ${r.status}`);
+      if (!j.result) throw new Error("无分析结果");
+      return j.result;
+    },
+    onSuccess: (data) => {
+      setAi(data);
     },
   });
 
