@@ -51,10 +51,12 @@ export async function callUnifiedAi(messages: ChatMessage[], responseAsJson = fa
       ...(responseAsJson ? { response_format: { type: "json_object" } } : {}),
     }),
   });
+
   if (!res.ok) {
     const t = await res.text();
     throw new Error((t || `OpenRouter HTTP ${res.status}`).slice(0, 800));
   }
+
   const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
   const out = data.choices?.[0]?.message?.content;
   if (typeof out !== "string") {

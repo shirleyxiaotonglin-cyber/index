@@ -93,9 +93,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ result: buildDecomposeSuggestion(t) });
   }
 
-  if (!projectId) {
-    return NextResponse.json({ error: "projectId required" }, { status: 400 });
-  }
+  if (!projectId) return NextResponse.json({ error: "projectId required" }, { status: 400 });
 
   const role = await getProjectRole(user.id, projectId);
   if (user.globalRole !== "ADMIN" && !role) {
@@ -107,12 +105,9 @@ export async function POST(req: Request) {
   const project = await prisma.project.findUnique({ where: { id: projectId } });
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  if (kind === "daily") {
-    return NextResponse.json({ result: buildDailyReport(project, tasks) });
-  }
-  if (kind === "weekly") {
-    return NextResponse.json({ result: buildWeeklyReport(project, tasks) });
-  }
+  if (kind === "daily") return NextResponse.json({ result: buildDailyReport(project, tasks) });
+  if (kind === "weekly") return NextResponse.json({ result: buildWeeklyReport(project, tasks) });
+
   if (kind === "project") {
     const done = tasks.filter((t) => t.status === "done").length;
     const rate = tasks.length ? Math.round((done / tasks.length) * 1000) / 10 : 0;
@@ -125,15 +120,13 @@ export async function POST(req: Request) {
       },
     });
   }
+
   if (kind === "project_deep") {
     return NextResponse.json({ result: buildProjectDeepSummary(project, tasks) });
   }
-  if (kind === "risk") {
-    return NextResponse.json({ result: buildRiskAnalysis(tasks) });
-  }
-  if (kind === "risk_predict") {
-    return NextResponse.json({ result: buildRiskPredict(tasks) });
-  }
+  if (kind === "risk") return NextResponse.json({ result: buildRiskAnalysis(tasks) });
+  if (kind === "risk_predict") return NextResponse.json({ result: buildRiskPredict(tasks) });
+
   if (kind === "workload") {
     const byAssignee = await prisma.task.groupBy({
       by: ["assigneeId"],
@@ -146,10 +139,7 @@ export async function POST(req: Request) {
       result: {
         distribution: sorted.map((s) => ({ assigneeId: s.assigneeId, open: s._count._all })),
         overload,
-        suggestion:
-          overload.length > 0
-            ? "部分成员待办较多，建议平衡或拆分任务。"
-            : "负载相对均衡。",
+        suggestion: overload.length > 0 ? "部分成员待办较多，建议平衡或拆分任务。" : "负载相对均衡。",
       },
     });
   }
