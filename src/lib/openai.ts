@@ -5,12 +5,17 @@ const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
 const DEFAULT_MODEL = "meta-llama/llama-3.1-8b-instruct:free";
 
 function resolveModel(): string {
-  return (process.env.OPENROUTER_MODEL || DEFAULT_MODEL).trim() || DEFAULT_MODEL;
+  return (
+    process.env.OPENROUTER_MODEL ||
+    DEFAULT_MODEL
+  ).trim() || DEFAULT_MODEL;
 }
 
 function requireOpenRouterKey(): string {
   const key = process.env.OPENROUTER_API_KEY?.trim();
-  if (!key) throw new Error("未配置 OPENROUTER_API_KEY");
+  if (!key) {
+    throw new Error("未配置 OPENROUTER_API_KEY");
+  }
   return key;
 }
 
@@ -42,7 +47,9 @@ export async function callUnifiedAi(messages: ChatMessage[], responseAsJson = fa
 
   const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
   const out = data.choices?.[0]?.message?.content;
-  if (typeof out !== "string") throw new Error("Invalid OpenRouter response");
+  if (typeof out !== "string") {
+    throw new Error("Invalid OpenRouter response");
+  }
   return out;
 }
 
@@ -52,7 +59,7 @@ export async function chatJsonWithSystem(system: string, user: string): Promise<
       { role: "system", content: system },
       { role: "user", content: user },
     ],
-    true
+    true,
   );
   try {
     return JSON.parse(text) as unknown;
