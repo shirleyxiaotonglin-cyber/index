@@ -1,3 +1,4 @@
+// src/lib/ai-typed-openai.ts
 import { chatJsonWithSystem } from "./openai";
 
 function truncate(s: string, max: number) {
