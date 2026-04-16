@@ -39,18 +39,30 @@ export async function callUnifiedAi(messages: ChatMessage[], responseAsJson = fa
       ...(responseAsJson ? { response_format: { type: "json_object" } } : {}),
     }),
   });
-
   if (!res.ok) {
     const t = await res.text();
     throw new Error((t || `OpenRouter HTTP ${res.status}`).slice(0, 800));
   }
-
   const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
   const out = data.choices?.[0]?.message?.content;
   if (typeof out !== "string") {
     throw new Error("Invalid OpenRouter response");
   }
   return out;
+}
+
+export async function chatJsonPrompt(userContent: string): Promise<string> {
+  return callUnifiedAi(
+    [
+      {
+        role: "system",
+        content:
+          "你是企业任务与项目管理助手。严格只输出一个 JSON 对象，符合用户给出的结构要求；不要 Markdown 代码块，不要任何 JSON 以外的文字。使用中文。",
+      },
+      { role: "user", content: userContent },
+    ],
+    true,
+  );
 }
 
 export async function chatJsonWithSystem(system: string, user: string): Promise<unknown> {
@@ -66,4 +78,8 @@ export async function chatJsonWithSystem(system: string, user: string): Promise<
   } catch {
     throw new Error("模型输出不是合法 JSON");
   }
+}
+
+export async function chatText(prompt: string): Promise<string> {
+  return callUnifiedAi([{ role: "user", content: prompt }], false);
 }
