@@ -1,81 +1,69 @@
 /**
- * OpenAI Chat Completions（gpt-4o-mini），用于任务/项目 AI 分析。
- * 未设置 OPENAI_API_KEY 时由调用方回退到规则引擎（ai-mock）。
+ * OpenRouter 统一调用层：所有 AI 功能都走这里。
  */
+const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
+const DEFAULT_MODEL = "meta-llama/llama-3.1-8b-instruct:free";
 
-export async function openaiChatJson(userContent: string): Promise<string> {
-  const key = process.env.OPENAI_API_KEY?.trim();
+function resolveModel(): string {
+  return (
+    process.env.OPENROUTER_MODEL ||
+    DEFAULT_MODEL
+  ).trim() || DEFAULT_MODEL;
+}
+
+function requireOpenRouterKey(): string {
+  const key = process.env.OPENROUTER_API_KEY?.trim();
   if (!key) {
-    throw new Error("OPENAI_API_KEY not configured");
+    throw new Error("未配置 OPENROUTER_API_KEY");
   }
-  const base = (process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, "");
-  const res = await fetch(`${base}/chat/completions`, {
+  return key;
+}
+
+export function hasOpenRouterKey(): boolean {
+  return !!process.env.OPENROUTER_API_KEY?.trim();
+}
+
+type ChatMessage = { role: "system" | "user"; content: string };
+
+export async function callUnifiedAi(messages: ChatMessage[], responseAsJson = false): Promise<string> {
+  const res = await fetch(OPENROUTER_ENDPOINT, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${key}`,
+      Authorization: `Bearer ${requireOpenRouterKey()}`,
     },
     body: JSON.stringify({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content:
-            "你是企业任务与项目管理助手。严格只输出一个 JSON 对象，符合用户给出的结构要求；不要 Markdown 代码块，不要任何 JSON 以外的文字。使用中文。",
-        },
-        { role: "user", content: userContent },
-      ],
-      temperature: 0.4,
-      response_format: { type: "json_object" },
+      model: resolveModel(),
+      messages,
+      temperature: 0.35,
+      ...(responseAsJson ? { response_format: { type: "json_object" } } : {}),
     }),
   });
+
   if (!res.ok) {
     const t = await res.text();
-    throw new Error(t || `OpenAI HTTP ${res.status}`);
+    throw new Error((t || `OpenRouter HTTP ${res.status}`).slice(0, 800));
   }
-  const data = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
+
+  const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
   const out = data.choices?.[0]?.message?.content;
   if (typeof out !== "string") {
-    throw new Error("Invalid OpenAI response");
+    throw new Error("Invalid OpenRouter response");
   }
   return out;
 }
 
-export function hasOpenAiKey(): boolean {
-  return !!process.env.OPENAI_API_KEY?.trim();
-}
-
-/** 纯文本补全（如 POST /api/ai 仅传 prompt） */
-export async function openaiChatCompletionText(prompt: string): Promise<string> {
-  const key = process.env.OPENAI_API_KEY?.trim();
-  if (!key) {
-    throw new Error("OPENAI_API_KEY not configured");
+export async function chatJsonWithSystem(system: string, user: string): Promise<unknown> {
+  const text = await callUnifiedAi(
+    [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+    true,
+  );
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    throw new Error("模型输出不是合法 JSON");
   }
-  const base = (process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, "");
-  const res = await fetch(`${base}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${key}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.5,
-    }),
-  });
-  if (!res.ok) {
-    const t = await res.text();
-    throw new Error(t || `OpenAI HTTP ${res.status}`);
-  }
-  const data = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-  const out = data.choices?.[0]?.message?.content;
-  if (typeof out !== "string") {
-    throw new Error("Invalid OpenAI response");
-  }
-  return out;
 }
