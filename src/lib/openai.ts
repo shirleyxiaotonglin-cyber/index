@@ -5,10 +5,11 @@ const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
 const DEFAULT_MODEL = "meta-llama/llama-3.1-8b-instruct:free";
 
 function resolveModel(): string {
-  return (
-    process.env.OPENROUTER_MODEL ||
-    DEFAULT_MODEL
-  ).trim() || DEFAULT_MODEL;
+  const raw = (process.env.OPENROUTER_MODEL || "").trim();
+  if (!raw || raw === "api/v1" || raw === "v1" || raw.startsWith("http://") || raw.startsWith("https://")) {
+    return DEFAULT_MODEL;
+  }
+  return raw;
 }
 
 function requireOpenRouterKey(): string {
@@ -17,6 +18,20 @@ function requireOpenRouterKey(): string {
     throw new Error("未配置 OPENROUTER_API_KEY");
   }
   return key;
+}
+
+function openRouterHeaders(apiKey: string): Record<string, string> {
+  const h: Record<string, string> = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${apiKey}`,
+  };
+  const referer = process.env.OPENROUTER_HTTP_REFERER?.trim() || process.env.VERCEL_URL?.trim();
+  if (referer) {
+    h["HTTP-Referer"] = referer.startsWith("http") ? referer : `https://${referer}`;
+  }
+  const title = process.env.OPENROUTER_APP_TITLE?.trim();
+  if (title) h["X-Title"] = title.slice(0, 120);
+  return h;
 }
 
 export function hasOpenRouterKey(): boolean {
@@ -28,10 +43,7 @@ type ChatMessage = { role: "system" | "user"; content: string };
 export async function callUnifiedAi(messages: ChatMessage[], responseAsJson = false): Promise<string> {
   const res = await fetch(OPENROUTER_ENDPOINT, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${requireOpenRouterKey()}`,
-    },
+    headers: openRouterHeaders(requireOpenRouterKey()),
     body: JSON.stringify({
       model: resolveModel(),
       messages,

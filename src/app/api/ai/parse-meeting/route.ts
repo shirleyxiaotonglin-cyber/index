@@ -39,7 +39,7 @@ export async function POST(req: Request) {
 
   const out = await parseMeetingWithAi(text);
   if (!out.ok) {
-    const status = out.error.includes("OPENROUTER_API_KEY") ? 503 : 502;
+    const status = /未配置 OpenRouter|OPENROUTER_API_KEY/.test(out.error) ? 503 : 502;
     return withCors(
       NextResponse.json({ ok: false, error: out.error, detail: out.detail }, { status })
     );

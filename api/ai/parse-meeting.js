@@ -46,21 +46,39 @@ module.exports = async function handler(req, res) {
   if (!text) {
     return res.status(400).json({ ok: false, error: "text 为空" });
   }
-  const key = process.env.OPENROUTER_API_KEY;
-  if (!key || !String(key).trim()) {
-    return res.status(503).json({ ok: false, error: "服务器未配置 OPENROUTER_API_KEY" });
+  var orKey = String(process.env.OPENROUTER_API_KEY || "").trim();
+  var leg = String(process.env.OPENAI_API_KEY || "").trim();
+  var key = orKey || (leg.indexOf("sk-or-") === 0 ? leg : "");
+  if (!key) {
+    return res.status(503).json({
+      ok: false,
+      error: "服务器未配置 OpenRouter 密钥（请在 Vercel 设置环境变量 OPENROUTER_API_KEY）",
+    });
   }
   const base = "https://openrouter.ai/api/v1";
-  const model =
-    process.env.OPENROUTER_MEETING_MODEL ||
-    process.env.OPENROUTER_MODEL ||
-    "meta-llama/llama-3.1-8b-instruct:free";
+  var DEFAULT_MR_MODEL = "meta-llama/llama-3.1-8b-instruct:free";
+  var rawModel = String(
+    process.env.OPENROUTER_MEETING_MODEL || process.env.OPENROUTER_MODEL || ""
+  ).trim();
+  var model =
+    !rawModel ||
+    rawModel === "api/v1" ||
+    rawModel === "v1" ||
+    rawModel.indexOf("http://") === 0 ||
+    rawModel.indexOf("https://") === 0
+      ? DEFAULT_MR_MODEL
+      : rawModel;
+  var hdr = {
+    Authorization: "Bearer " + String(key).trim(),
+    "Content-Type": "application/json",
+  };
+  var ref = String(process.env.OPENROUTER_HTTP_REFERER || process.env.VERCEL_URL || "").trim();
+  if (ref) hdr["HTTP-Referer"] = ref.indexOf("http") === 0 ? ref : "https://" + ref;
+  var xt = String(process.env.OPENROUTER_APP_TITLE || "").trim();
+  if (xt) hdr["X-Title"] = xt.slice(0, 120);
   const r = await fetch(base + "/chat/completions", {
     method: "POST",
-    headers: {
-      Authorization: "Bearer " + String(key).trim(),
-      "Content-Type": "application/json",
-    },
+    headers: hdr,
     body: JSON.stringify({
       model,
       temperature: 0.2,
@@ -73,7 +91,7 @@ module.exports = async function handler(req, res) {
   });
   const raw = await r.text();
   if (!r.ok) {
-    return res.status(502).json({ ok: false, error: "模型请求失败", detail: raw.slice(0, 400) });
+    return res.status(502).json({ ok: false, error: "OpenRouter 请求失败", detail: raw.slice(0, 400) });
   }
   let data;
   try {
