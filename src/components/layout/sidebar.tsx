@@ -17,7 +17,7 @@ import { Separator } from "@/components/ui/separator";
 export type ProjectNav = { id: string; name: string };
 
 const nav = [
-  { href: "/", label: "总览", icon: LayoutDashboard },
+  { href: "/dashboard", label: "总览", icon: LayoutDashboard },
   { href: "/projects", label: "项目", icon: Briefcase },
   { href: "/my", label: "我的任务", icon: UserCircle2 },
   { href: "/ai", label: "AI 控制中心", icon: Sparkles },

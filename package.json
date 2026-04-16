@@ -12,6 +12,7 @@
     "db:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed",
     "postinstall": "prisma generate",
+    "sync:index": "cp index.html public/index.html",
     "deploy:vercel": "vercel deploy --prod --yes",
     "deploy:vercel:debug": "vercel deploy --prod --yes --debug"
   },

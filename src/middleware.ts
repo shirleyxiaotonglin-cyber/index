@@ -8,12 +8,18 @@ function authSecret() {
   return process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET;
 }
 
+/** 根路径与静态单页 index.html 无需登录（与 public/index.html 一致） */
+function isPublicPath(pathname: string) {
+  if (pathname === "/" || pathname === "/index.html") return true;
+  return publicPaths.some((p) => pathname.startsWith(p));
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   if (pathname.startsWith("/api")) {
     return NextResponse.next();
   }
-  if (publicPaths.some((p) => pathname.startsWith(p))) {
+  if (isPublicPath(pathname)) {
     return NextResponse.next();
   }
   if (pathname.startsWith("/_next") || pathname.startsWith("/favicon")) {
@@ -41,7 +47,7 @@ export async function middleware(request: NextRequest) {
   }
 
   if (token && pathname === "/login") {
-    return NextResponse.redirect(new URL("/", request.url));
+    return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
   return NextResponse.next();

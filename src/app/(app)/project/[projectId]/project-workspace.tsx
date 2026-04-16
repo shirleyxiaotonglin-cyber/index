@@ -131,7 +131,7 @@ export function ProjectWorkspace({ projectId, projectName }: { projectId: string
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <div className="text-xs text-muted-foreground">
-            <Link href="/" className="hover:text-foreground">
+            <Link href="/dashboard" className="hover:text-foreground">
               总览
             </Link>
             <span className="mx-1">/</span>
