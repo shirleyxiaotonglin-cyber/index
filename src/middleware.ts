@@ -19,6 +19,10 @@ export async function middleware(request: NextRequest) {
   if (pathname.startsWith("/api")) {
     return NextResponse.next();
   }
+  /** public 文件夹下的 .html 等静态页不走登录校验 */
+  if (pathname.endsWith(".html")) {
+    return NextResponse.next();
+  }
   if (isPublicPath(pathname)) {
     return NextResponse.next();
   }
@@ -53,9 +57,10 @@ export async function middleware(request: NextRequest) {
   return NextResponse.next();
 }
 
-/** 必须排除整个 `/_next`（含 webpack-hmr、turbopack 等），否则未登录时会把资源请求重定向到 /login，页面无法打开。 */
+/** 必须包含 `/`，且排除 .html，否则根路径与 index.html 行为在部分环境下不一致 */
 export const config = {
   matcher: [
-    "/((?!api|_next|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/",
+    "/((?!api|_next|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|html)$).*)",
   ],
 };
