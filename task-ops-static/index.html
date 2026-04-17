@@ -4232,20 +4232,36 @@
     if (modeAp) modeAp.onchange = syncMeetMode;
     syncMeetMode();
     var elParseAi = document.getElementById("meet-parse-ai");
-    function runMeetingParse(callback) {
+    var meetingParseCache = { key: "", parsed: null, err: null };
+    function currentMeetingParseKey() {
+      var txt = (ta && ta.value) || "";
+      var mode = canUseAiMeetingParse() && elParseAi && elParseAi.checked ? "ai" : "rules";
+      return mode + "::" + txt;
+    }
+    function runMeetingParse(callback, forceRefresh) {
+      var key = currentMeetingParseKey();
+      if (!forceRefresh && meetingParseCache.key === key && meetingParseCache.parsed) {
+        callback(meetingParseCache.parsed, meetingParseCache.err);
+        return;
+      }
       var txt = (ta && ta.value) || "";
       if (canUseAiMeetingParse() && elParseAi && elParseAi.checked) {
         parseMeetingTextWithAI(txt, function (res) {
           if (res.err) {
             var local = parseMeetingText(txt);
-            callback(local, { aiFallback: true, detail: res.err });
+            var errObj = { aiFallback: true, detail: res.err };
+            meetingParseCache = { key: key, parsed: local, err: errObj };
+            callback(local, errObj);
             return;
           }
+          meetingParseCache = { key: key, parsed: res.parsed, err: null };
           callback(res.parsed, null);
         });
         return;
       }
-      callback(parseMeetingText(txt), null);
+      var parsed = parseMeetingText(txt);
+      meetingParseCache = { key: key, parsed: parsed, err: null };
+      callback(parsed, null);
     }
     function doPreview() {
       if (canUseAiMeetingParse() && elParseAi && elParseAi.checked && pre) {
@@ -4273,7 +4289,7 @@
     document.getElementById("meet-cancel").onclick = closeModal;
     document.getElementById("meet-preview").onclick = doPreview;
     document.getElementById("meet-apply").onclick = function () {
-      runMeetingParse(function (parsed, err) {
+      function applyWithParsed(parsed, err) {
         if (typeof err === "string") {
           alert(err);
           return;
@@ -4307,7 +4323,14 @@
         closeModal();
         alert("已导入 " + parsed.tasks.length + " 条任务。");
         render();
-      });
+      }
+      var cacheKey = currentMeetingParseKey();
+      if (meetingParseCache.key === cacheKey && meetingParseCache.parsed) {
+        applyWithParsed(meetingParseCache.parsed, meetingParseCache.err);
+        return;
+      }
+      if (pre) pre.textContent = "正在解析后应用，请稍候…";
+      runMeetingParse(applyWithParsed);
     };
   }
 
