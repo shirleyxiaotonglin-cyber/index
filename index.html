@@ -625,8 +625,9 @@
   }
 
   /**
-   * 会议纪要 AI 请求的 API 根：WORKGRAPH_AI_PARSE_ORIGIN → localStorage workgraph_ai_api_base → apiBase() →
-   * 同源相对路径 "" → WORKGRAPH_AI_PARSE_ORIGIN_FALLBACK（公网默认代理，可改为自建）。
+   * 会议纪要 / AI 中心 请求的 API 根：WORKGRAPH_AI_PARSE_ORIGIN → localStorage workgraph_ai_api_base →
+   * 若 apiBase() 指向「与当前页不同源」的同步服务（如 :3780），则 AI 仍走当前页同源 /api（Next / Vercel）；
+   * 否则 file:// 等再回退 WORKGRAPH_AI_PARSE_ORIGIN_FALLBACK。
    */
   function meetingAiApiBase() {
     try {
@@ -640,7 +641,17 @@
       if (la && String(la).trim()) return String(la).trim().replace(/\/$/, "");
     } catch (e1) {}
     var ab = apiBase();
-    if (ab) return ab;
+    if (ab) {
+      try {
+        var baseUrl = ab.indexOf("http") === 0 ? ab : window.location.protocol + "//" + String(ab).replace(/^\/+/, "");
+        var u = new URL(baseUrl);
+        if (u.origin === window.location.origin) return ab.replace(/\/$/, "");
+      } catch (eA) {}
+      try {
+        if (location.protocol === "http:" || location.protocol === "https:") return "";
+      } catch (eB) {}
+      return ab.replace(/\/$/, "");
+    }
     try {
       var p = location.protocol;
       if (p === "http:" || p === "https:") return "";
