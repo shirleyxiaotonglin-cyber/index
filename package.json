@@ -14,7 +14,8 @@
     "postinstall": "prisma generate",
     "sync:index": "cp index.html public/index.html",
     "deploy:vercel": "vercel deploy --prod --yes",
-    "deploy:vercel:debug": "vercel deploy --prod --yes --debug"
+    "deploy:vercel:debug": "vercel deploy --prod --yes --debug",
+    "eval:meeting-parse": "node scripts/eval-meeting-parse.mjs"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

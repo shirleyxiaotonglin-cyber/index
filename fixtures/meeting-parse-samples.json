@@ -1,0 +1,102 @@
+[
+  {
+    "id": "s01",
+    "input": {"projectName":"增长项目","tasks":[{"title":"首页改版","description":"由张三负责，李四协作，明天提测","priority":"高","status":"进行中","tags":"#前端 #增长"}]},
+    "expected": {"tasks":[{"assignee":"张三","collaborators":"李四","priority":"P1","status":"doing","deadline":"REL_TOMORROW"}]}
+  },
+  {
+    "id": "s02",
+    "input": {"tasks":[{"title":"支付联调","description":"本周五完成，王五（主），赵六/钱七协作","priority":"","status":"todo"}]},
+    "expected": {"tasks":[{"assignee":"王五","collaborators":"赵六, 钱七","priority":"P2","deadline":"REL_THIS_FRI"}]}
+  },
+  {
+    "id": "s03",
+    "input": {"tasks":[{"title":"风控规则","description":"下周三上线，阻塞项先处理","priority":"低","status":"todo"}]},
+    "expected": {"tasks":[{"priority":"P0","deadline":"REL_NEXT_WED"}]}
+  },
+  {
+    "id": "s04",
+    "input": {"tasks":[{"title":"短信模板清理","description":"DDL 2026/05/09","priority":"中","status":"review"}]},
+    "expected": {"tasks":[{"priority":"P2","status":"review","deadline":"2026-05-09"}]}
+  },
+  {
+    "id": "s05",
+    "input": {"tasks":[{"title":"A/B实验配置","description":"由 陈晨 负责","priority":"最高","status":"待测"}]},
+    "expected": {"tasks":[{"assignee":"陈晨","priority":"P0","status":"review"}]}
+  },
+  {
+    "id": "s06",
+    "input": {"tasks":[{"title":"埋点核对","description":"张三（主） 李四协作；后天交付","priority":"","status":""}]},
+    "expected": {"tasks":[{"assignee":"张三","collaborators":"李四","deadline":"REL_DAY_AFTER_TOMORROW"}]}
+  },
+  {
+    "id": "s07",
+    "input": {"tasks":[{"title":" 项目周报  ","description":"   低优先级，李雷负责   ","priority":"", "status":"blocked"}]},
+    "expected": {"tasks":[{"assignee":"李雷","priority":"P3","status":"blocked"}]}
+  },
+  {
+    "id": "s08",
+    "input": {"tasks":[{"title":"需求澄清","description":"负责人:韩梅梅；协作:小王,小刘","priority":"P1","status":"doing"}]},
+    "expected": {"tasks":[{"assignee":"韩梅梅","collaborators":"小王, 小刘","priority":"P1"}]}
+  },
+  {
+    "id": "s09",
+    "input": {"tasks":[{"title":"数据修复","description":"紧急修复，今天完成","priority":"","status":"进行中"}]},
+    "expected": {"tasks":[{"priority":"P0","status":"doing"}]}
+  },
+  {
+    "id": "s10",
+    "input": {"tasks":[{"title":"客服SOP","description":"由赵敏牵头；无明确DDL","priority":"中","status":"todo"}]},
+    "expected": {"tasks":[{"assignee":"赵敏","priority":"P2","deadline":""}]}
+  },
+  {
+    "id": "s11",
+    "input": {"tasks":[{"title":"多端联调","description":"A（主），B/C；下周一","priority":"高","status":"todo"}]},
+    "expected": {"tasks":[{"assignee":"A","collaborators":"B, C","priority":"P1"}]}
+  },
+  {
+    "id": "s12",
+    "input": {"tasks":[{"title":"公告发布","description":"2026-12-01 发布","priority":"低","status":"done"}]},
+    "expected": {"tasks":[{"deadline":"2026-12-01","priority":"P3","status":"done"}]}
+  },
+  {
+    "id": "s13",
+    "input": {"tasks":[{"title":"公告发布","description":"2026-12-01 发布","priority":"低","status":"done"},{"title":"公告发布","description":"2026-12-01 发布","priority":"低","status":"done"}]},
+    "expected": {"taskCount":1}
+  },
+  {
+    "id": "s14",
+    "input": {"tasks":[{"title":"接口联调","description":"并由老王支持","priority":"中","status":"todo"}]},
+    "expected": {"tasks":[{"collaborators":"老王"}]}
+  },
+  {
+    "id": "s15",
+    "input": {"tasks":[{"title":"文档补齐","description":"优先级：高；负责人：Mia","priority":"","status":"todo"}]},
+    "expected": {"tasks":[{"assignee":"Mia","priority":"P1"}]}
+  },
+  {
+    "id": "s16",
+    "input": {"tasks":[{"title":"登录页改色","description":"本周二给设计验收","priority":"中","status":"进行中"}]},
+    "expected": {"tasks":[{"status":"doing","priority":"P2"}]}
+  },
+  {
+    "id": "s17",
+    "input": {"tasks":[{"title":"SQL优化","description":"阻塞，需DBA协助","priority":"高","status":"todo"}]},
+    "expected": {"tasks":[{"priority":"P0"}]}
+  },
+  {
+    "id": "s18",
+    "input": {"tasks":[{"title":"报表重算","description":"deadline: 2026.07.08","priority":"中","status":"review"}]},
+    "expected": {"tasks":[{"deadline":"2026-07-08","status":"review"}]}
+  },
+  {
+    "id": "s19",
+    "input": {"tasks":[{"title":"多语言文案","description":"由Alice负责，Bob协作，标签 #i18n #copy","priority":"低","status":"todo","tags":"#i18n #copy"}]},
+    "expected": {"tasks":[{"assignee":"Alice","collaborators":"Bob","tags":"i18n, copy"}]}
+  },
+  {
+    "id": "s20",
+    "input": {"tasks":[{"title":"错别字修fu","description":"由小明负责, 小红配合, 明天提测","priority":"高","status":"doing"}]},
+    "expected": {"tasks":[{"assignee":"小明","collaborators":"小红","priority":"P1","status":"doing","deadline":"REL_TOMORROW"}]}
+  }
+]
