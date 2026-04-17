@@ -3,12 +3,14 @@
  */
 const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
 const DEFAULT_MODEL = "meta-llama/llama-3.3-70b-instruct:free";
+const RETIRED_OPENROUTER_FREE_MODELS = new Set(["meta-llama/llama-3.1-8b-instruct:free"]);
 
 function resolveModel(): string {
   const raw = (process.env.OPENROUTER_MODEL || "").trim();
   if (!raw || raw === "api/v1" || raw === "v1" || raw.startsWith("http://") || raw.startsWith("https://")) {
     return DEFAULT_MODEL;
   }
+  if (RETIRED_OPENROUTER_FREE_MODELS.has(raw)) return DEFAULT_MODEL;
   return raw;
 }
 

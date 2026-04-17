@@ -60,6 +60,7 @@ module.exports = async function handler(req, res) {
   var rawModel = String(
     process.env.OPENROUTER_MEETING_MODEL || process.env.OPENROUTER_MODEL || ""
   ).trim();
+  if (rawModel === "meta-llama/llama-3.1-8b-instruct:free") rawModel = "";
   var model =
     !rawModel ||
     rawModel === "api/v1" ||
