@@ -121,6 +121,40 @@ export function buildDecomposeSuggestion(title: string) {
   };
 }
 
+export function buildStandup(project: Pick<Project, "name">, tasks: TaskLite[]) {
+  const doing = tasks.filter((t) => t.status === "doing").map((t) => t.title);
+  const blocked = tasks.filter((t) => t.status === "blocked").map((t) => t.title);
+  const todo = tasks.filter((t) => t.status === "todo").map((t) => t.title);
+  return {
+    type: "standup" as const,
+    todayFocus: doing.slice(0, 8).length ? doing.slice(0, 8) : todo.slice(0, 8),
+    yesterdayDone: tasks.filter((t) => t.status === "done").map((t) => t.title).slice(0, 8),
+    blockers: blocked.slice(0, 8),
+    needsHelp: blocked.slice(0, 5).map((t) => `需协调解除：${t}`),
+    summary: `${project.name}：进行中 ${doing.length + todo.length} 项，阻塞 ${blocked.length} 项。`,
+  };
+}
+
+export function buildExecutiveBrief(project: Pick<Project, "name">, tasks: TaskLite[]) {
+  const done = tasks.filter((t) => t.status === "done").length;
+  const blocked = tasks.filter((t) => t.status === "blocked").length;
+  const open = tasks.length - done;
+  const health =
+    blocked > 2 ? ("red" as const) : blocked > 0 || open > 15 ? ("yellow" as const) : ("green" as const);
+  return {
+    type: "executive_brief" as const,
+    headline: `${project.name}：${open} 项未关闭，已完成 ${done} 项`,
+    health,
+    bullets: [
+      `总任务 ${tasks.length}，未关闭 ${open}`,
+      blocked ? `阻塞 ${blocked} 项需决策或资源` : "当前无阻塞项",
+    ],
+    risks: blocked > 0 ? [`阻塞集中于 ${blocked} 项，可能影响里程碑`] : [],
+    asks: blocked > 2 ? ["请协调关键依赖与责任人"] : [],
+    narrative: `面向管理层的简要状态：${project.name} 交付节奏${health === "green" ? "稳定" : "需关注"}。`,
+  };
+}
+
 export function buildRiskPredict(tasks: TaskLite[]) {
   const soon = new Date(Date.now() + 3 * 86400000);
   const likelyDelay = tasks.filter(

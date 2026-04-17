@@ -10,9 +10,12 @@ import {
   buildProjectDeepSummary,
   buildDecomposeSuggestion,
   buildRiskPredict,
+  buildStandup,
+  buildExecutiveBrief,
 } from "@/lib/ai-mock";
 import { hasOpenRouterKey } from "@/lib/openai";
 import { runTypedAi } from "@/lib/ai-typed-openai";
+import { runAiCenterKind } from "@/lib/ai-center-openrouter";
 import { z } from "zod";
 
 /** POST { type, content, projectId } → OpenRouter JSON（与 kind 体系独立） */
@@ -33,6 +36,10 @@ const bodySchema = z.object({
     "task_summary",
     "workload",
     "decompose",
+    "next_actions",
+    "retro",
+    "standup",
+    "executive_brief",
   ]),
   projectId: z.string().optional(),
   taskId: z.string().optional(),
@@ -84,12 +91,42 @@ export async function POST(req: Request) {
     const where = taskVisibilityWhere(task.projectId, user.id, user.globalRole, role);
     const ok = await prisma.task.findFirst({ where: { AND: [{ id: taskId }, where] } });
     if (!ok) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const project = await prisma.project.findUnique({ where: { id: task.projectId } });
+    const projectName = project?.name ?? "项目";
+    if (hasOpenRouterKey()) {
+      try {
+        const ai = await runAiCenterKind({
+          kind: "task_summary",
+          projectId: task.projectId,
+          projectName,
+          tasks: [task],
+          task: task,
+        });
+        return NextResponse.json({ result: ai });
+      } catch {
+        // fallback below
+      }
+    }
     return NextResponse.json({ result: buildTaskSummary(task) });
   }
 
   if (kind === "decompose") {
     const t = (title || "").trim();
     if (!t) return NextResponse.json({ error: "title required" }, { status: 400 });
+    if (hasOpenRouterKey()) {
+      try {
+        const ai = await runAiCenterKind({
+          kind: "decompose",
+          projectId: projectId || "N/A",
+          projectName: "Decompose",
+          tasks: [],
+          title: t,
+        });
+        return NextResponse.json({ result: ai });
+      } catch {
+        // fallback below
+      }
+    }
     return NextResponse.json({ result: buildDecomposeSuggestion(t) });
   }
 
@@ -104,6 +141,31 @@ export async function POST(req: Request) {
   const tasks = await prisma.task.findMany({ where });
   const project = await prisma.project.findUnique({ where: { id: projectId } });
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  if (hasOpenRouterKey()) {
+    try {
+      const ai = await runAiCenterKind({
+        kind: kind as
+          | "daily"
+          | "weekly"
+          | "project"
+          | "project_deep"
+          | "risk"
+          | "risk_predict"
+          | "workload"
+          | "next_actions"
+          | "retro"
+          | "standup"
+          | "executive_brief",
+        projectId,
+        projectName: project.name,
+        tasks,
+      });
+      return NextResponse.json({ result: ai });
+    } catch {
+      // fallback to rule engine
+    }
+  }
 
   if (kind === "daily") return NextResponse.json({ result: buildDailyReport(project, tasks) });
   if (kind === "weekly") return NextResponse.json({ result: buildWeeklyReport(project, tasks) });
@@ -126,6 +188,34 @@ export async function POST(req: Request) {
   }
   if (kind === "risk") return NextResponse.json({ result: buildRiskAnalysis(tasks) });
   if (kind === "risk_predict") return NextResponse.json({ result: buildRiskPredict(tasks) });
+  if (kind === "next_actions") {
+    const top = tasks
+      .filter((t) => t.status !== "done")
+      .sort((a, b) => (a.priority > b.priority ? -1 : 1))
+      .slice(0, 6)
+      .map((t) => t.title);
+    return NextResponse.json({ result: { type: "next_actions", next24h: top.slice(0, 3), next3d: top } });
+  }
+  if (kind === "retro") {
+    const done = tasks.filter((t) => t.status === "done").map((t) => t.title).slice(0, 5);
+    const blocked = tasks.filter((t) => t.status === "blocked").map((t) => t.title).slice(0, 5);
+    return NextResponse.json({
+      result: {
+        type: "retro",
+        whatWentWell: done,
+        whatToImprove: blocked,
+        actionItems: blocked.map((b) => ({ item: `解决：${b}`, owner: "", deadline: "" })),
+      },
+    });
+  }
+
+  if (kind === "standup") {
+    return NextResponse.json({ result: buildStandup(project, tasks) });
+  }
+
+  if (kind === "executive_brief") {
+    return NextResponse.json({ result: buildExecutiveBrief(project, tasks) });
+  }
 
   if (kind === "workload") {
     const byAssignee = await prisma.task.groupBy({
