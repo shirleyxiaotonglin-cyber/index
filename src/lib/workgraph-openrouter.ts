@@ -11,6 +11,8 @@ export type WorkgraphKind =
   | "risk"
   | "weekreport"
   | "decompose"
+  /** 将 AI 中心同款快照一次性交给模型：效率、风险、协作与节奏（面向员工提效） */
+  | "enterprise_pulse"
   /** 日程页：日度计划（含延期/今日焦点/未来7日/无DDL事项） */
   | "schedule_daily"
   /** 日程页：当前周视图内的周度计划表 */
@@ -63,6 +65,7 @@ function systemPrompt(kind: WorkgraphKind): string {
     schedule_daily: `${common} 生成「今日工作/日度计划」：基于未完成任务。依次覆盖：①已延期项（优先）；②今日焦点（开始或截止为今日）；③未来 7 日内截止；④无截止日期但进行中/阻塞/评审。最后给简短节奏建议。数据须与 JSON 一致。`,
     schedule_weekly: `${common} 生成「本周工作计划表」：按「视图周」周一至周日（见 meta.viewWeekStart～viewWeekEnd）列出每日有开始或截止落点的任务；若某日无落点可写「当日无开始/截止落点」。与周历视图一致。勿编造任务。`,
     schedule_todo: `${common} 生成「待办清单」：排序规则为延期优先 → 截止日升序 → 优先级；每条一行，含标题、优先级、截止、状态。`,
+    enterprise_pulse: `${common} 你是面向企业员工的工作效率顾问。用户消息含「AI 中心」完整任务与项目快照。请输出纯文本（不要用 Markdown 代码围栏），帮助员工看清负荷、优先级与协作风险，并给出可立即执行的效率建议。勿编造数据中不存在的任务标题。`,
   };
   return map[kind];
 }
@@ -121,6 +124,26 @@ function buildUserContent(input: WorkgraphInsightInput): string {
       `数据 JSON：\n${JSON.stringify(compact)}`
     );
   }
+  if (input.kind === "enterprise_pulse") {
+    const ws = input.weekStart;
+    const we = input.weekEnd;
+    const nw0 = input.nextWeekStart || "";
+    const nw1 = input.nextWeekEnd || "";
+    return (
+      `以下 JSON 为「AI 中心」向模型提供的完整快照（含项目、任务、自然周与下周区间）。\n` +
+      `请输出一份「企业工作全景 · 提效综合」纯文本，可直接给员工使用。\n\n` +
+      `【必须覆盖的章节】\n` +
+      `一、快照摘要：活跃项目数、任务总数、按状态粗计、完成率感知\n` +
+      `二、今日优先行动（≤3 条，可执行，引用任务标题时须来自 JSON）\n` +
+      `三、本周节奏与关键节点（结合 meta.weekStart～weekEnd 与 deadline）\n` +
+      `四、风险与延期：阻塞、已延期 deadline、高优先级缺口（列具体标题）\n` +
+      `五、效率建议：时间盒、拆分、减少打断、对齐与沟通（面向个人）\n` +
+      `六、下周关注点（结合 nextWeekStart～nextWeekEnd；若无则说明）\n` +
+      `最后一行：— 以上为基于当前快照的建议，可按实际会议与优先级微调 —\n\n` +
+      `汇报周期（自然周）：${ws}～${we}；下一周区间：${nw0}～${nw1}\n\n` +
+      `数据 JSON：\n${JSON.stringify(compact)}`
+    );
+  }
   const scopeNote =
     input.kind === "schedule_daily" || input.kind === "schedule_weekly" || input.kind === "schedule_todo"
       ? "（tasks 为当前日程筛选下的未完成任务快照）\n\n"
@@ -141,6 +164,7 @@ export async function runWorkgraphInsightWithOpenRouter(
     "risk",
     "weekreport",
     "decompose",
+    "enterprise_pulse",
     "schedule_daily",
     "schedule_weekly",
     "schedule_todo",

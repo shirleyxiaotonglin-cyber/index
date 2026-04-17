@@ -14,6 +14,7 @@ type Kind =
   | "dayplan"
   | "weekplan"
   | "weekreport"
+  | "enterprise_pulse"
   | "project"
   | "project_deep"
   | "risk"
@@ -37,6 +38,7 @@ function AiInner() {
   const [taskId, setTaskId] = useState("");
   const [decomposeTitle, setDecomposeTitle] = useState("");
   const [results, setResults] = useState<Partial<Record<Kind, unknown>>>({});
+  const [sources, setSources] = useState<Partial<Record<Kind, "openrouter" | "rules">>>({});
 
   const run = useMutation({
     mutationFn: async ({ kind, title, taskId: tid }: { kind: Kind; title?: string; taskId?: string }) => {
@@ -63,14 +65,18 @@ function AiInner() {
             : r.statusText;
         throw new Error(msg || "请求失败");
       }
-      return r.json() as Promise<{ result: unknown }>;
+      return r.json() as Promise<{ result: unknown; source?: "openrouter" | "rules" }>;
     },
     onSuccess: (data, variables) => {
       setResults((prev) => ({ ...prev, [variables.kind]: data.result }));
+      if (data.source === "openrouter" || data.source === "rules") {
+        setSources((prev) => ({ ...prev, [variables.kind]: data.source! }));
+      }
     },
   });
 
   function cell(title: string, kind: Kind, extra?: ReactNode) {
+    const src = sources[kind];
     return (
       <Card>
         <CardHeader>
@@ -85,6 +91,11 @@ function AiInner() {
           >
             生成
           </Button>
+          {src ? (
+            <p className="text-xs text-muted-foreground">
+              来源：{src === "openrouter" ? "AI 大模型（OpenRouter）" : "规则引擎"}
+            </p>
+          ) : null}
           <pre className="max-h-64 overflow-auto rounded-md bg-muted/40 p-3 text-xs">
             {results[kind] ? JSON.stringify(results[kind], null, 2) : "—"}
           </pre>
@@ -100,6 +111,7 @@ function AiInner() {
         <p className="text-sm text-muted-foreground">
           各模块优先走 OpenRouter（与会议纪要共用 <code className="text-xs">OPENROUTER_API_KEY</code>{" "}
           / <code className="text-xs">OPENROUTER_MODEL</code>）；失败时自动回退规则引擎。单任务摘要需填写 taskId。
+          每条结果下方标注「来源」，便于区分 AI 与本地规则。
         </p>
         {run.isError ? (
           <p className="text-sm text-destructive">{(run.error as Error)?.message ?? "出错"}</p>
@@ -118,6 +130,33 @@ function AiInner() {
             onChange={(e) => setProjectId(e.target.value)}
             className="max-w-md"
           />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">企业工作全景（AI 综合分析）</CardTitle>
+          <CardDescription>
+            将当前项目任务快照一次性交给模型，从负荷、风险、协作与节奏等维度给出面向员工的可执行建议（与静态页「AI 中心」同源能力）。
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <Button
+            size="sm"
+            onClick={() => run.mutate({ kind: "enterprise_pulse" })}
+            disabled={run.isPending || !projectId.trim()}
+          >
+            生成综合分析
+          </Button>
+          {sources.enterprise_pulse ? (
+            <p className="text-xs text-muted-foreground">
+              来源：
+              {sources.enterprise_pulse === "openrouter" ? "AI 大模型（OpenRouter）" : "规则引擎"}
+            </p>
+          ) : null}
+          <pre className="max-h-64 overflow-auto rounded-md bg-muted/40 p-3 text-xs">
+            {results.enterprise_pulse ? JSON.stringify(results.enterprise_pulse, null, 2) : "—"}
+          </pre>
         </CardContent>
       </Card>
 
@@ -163,6 +202,12 @@ function AiInner() {
           >
             生成
           </Button>
+          {sources.task_summary ? (
+            <p className="text-xs text-muted-foreground">
+              来源：
+              {sources.task_summary === "openrouter" ? "AI 大模型（OpenRouter）" : "规则引擎"}
+            </p>
+          ) : null}
           <pre className="max-h-64 overflow-auto rounded-md bg-muted/40 p-3 text-xs">
             {results.task_summary ? JSON.stringify(results.task_summary, null, 2) : "—"}
           </pre>
@@ -184,6 +229,11 @@ function AiInner() {
           >
             拆解
           </Button>
+          {sources.decompose ? (
+            <p className="text-xs text-muted-foreground">
+              来源：{sources.decompose === "openrouter" ? "AI 大模型（OpenRouter）" : "规则引擎"}
+            </p>
+          ) : null}
           <pre className="max-h-64 overflow-auto rounded-md bg-muted/40 p-3 text-xs">
             {results.decompose ? JSON.stringify(results.decompose, null, 2) : "—"}
           </pre>

@@ -265,6 +265,41 @@ export function buildExecutiveBrief(project: Pick<Project, "name">, tasks: TaskL
   };
 }
 
+export function buildEnterprisePulseFallback(project: Pick<Project, "name">, tasks: TaskLite[]) {
+  const done = tasks.filter((t) => t.status === "done").length;
+  const open = tasks.length - done;
+  const blocked = tasks.filter((t) => t.status === "blocked").length;
+  const health =
+    blocked > 2 ? ("red" as const) : blocked > 0 || open > 15 ? ("yellow" as const) : ("green" as const);
+  const byStatus: Record<string, number> = {};
+  for (const t of tasks) {
+    const s = String(t.status || "unknown");
+    byStatus[s] = (byStatus[s] || 0) + 1;
+  }
+  return {
+    type: "enterprise_pulse" as const,
+    projectName: project.name,
+    headline: `${project.name}：${open} 项未关闭，已完成 ${done} 项`,
+    health,
+    snapshot: {
+      summary: `共 ${tasks.length} 项任务；完成 ${done}；阻塞 ${blocked}。`,
+      byStatus,
+    },
+    todayFocus: [
+      open > 0 ? "从未完成项中优先处理 P0/P1" : "回顾并准备下一迭代需求",
+      blocked > 0 ? "跟进阻塞项并明确责任人" : "保持节奏，完成小步验收",
+    ],
+    weekRhythm: ["结合本周 deadline 与开始日对齐节奏；避免并行过多高优先级事项"],
+    risks: blocked > 0 ? [`当前 ${blocked} 项阻塞可能影响交付`] : [],
+    efficiencyActions: [
+      "时间盒：上午专注高优先级，下午处理协作与沟通",
+      "将大块任务拆成可当日验收的粒度",
+    ],
+    nextWeekFocus: ["根据下周 deadline 提前排期与对齐依赖"],
+    note: "AI 不可用时 · 本地规则引擎回退",
+  };
+}
+
 export function buildRiskPredict(tasks: TaskLite[]) {
   const soon = new Date(Date.now() + 3 * 86400000);
   const likelyDelay = tasks.filter(

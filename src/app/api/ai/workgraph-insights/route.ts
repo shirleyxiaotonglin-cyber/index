@@ -42,6 +42,7 @@ export async function POST(req: Request) {
     "risk",
     "weekreport",
     "decompose",
+    "enterprise_pulse",
     "schedule_daily",
     "schedule_weekly",
     "schedule_todo",

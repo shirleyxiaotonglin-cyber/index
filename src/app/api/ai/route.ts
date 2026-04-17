@@ -15,11 +15,16 @@ import {
   buildDayplanFallback,
   buildWeekplanNaturalFallback,
   buildWeekReportFallback,
+  buildEnterprisePulseFallback,
 } from "@/lib/ai-mock";
 import { hasOpenRouterKey } from "@/lib/openai";
 import { runTypedAi } from "@/lib/ai-typed-openai";
 import { runAiCenterKind } from "@/lib/ai-center-openrouter";
 import { z } from "zod";
+
+function jsonResult(result: unknown, source: "openrouter" | "rules") {
+  return NextResponse.json({ result, source });
+}
 
 /** POST { type, content, projectId } → OpenRouter JSON（与 kind 体系独立） */
 const typedBodySchema = z.object({
@@ -35,6 +40,7 @@ const bodySchema = z.object({
     "dayplan",
     "weekplan",
     "weekreport",
+    "enterprise_pulse",
     "project",
     "project_deep",
     "risk",
@@ -72,7 +78,7 @@ export async function POST(req: Request) {
 
     try {
       const result = await runTypedAi(type, content, project.name, projectId);
-      return NextResponse.json({ result });
+      return jsonResult(result, "openrouter");
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       return NextResponse.json({ error: msg }, { status: 502 });
@@ -108,12 +114,12 @@ export async function POST(req: Request) {
           tasks: [task],
           task: task,
         });
-        return NextResponse.json({ result: ai });
+        return jsonResult(ai, "openrouter");
       } catch {
         // fallback below
       }
     }
-    return NextResponse.json({ result: buildTaskSummary(task) });
+    return jsonResult(buildTaskSummary(task), "rules");
   }
 
   if (kind === "decompose") {
@@ -128,12 +134,12 @@ export async function POST(req: Request) {
           tasks: [],
           title: t,
         });
-        return NextResponse.json({ result: ai });
+        return jsonResult(ai, "openrouter");
       } catch {
         // fallback below
       }
     }
-    return NextResponse.json({ result: buildDecomposeSuggestion(t) });
+    return jsonResult(buildDecomposeSuggestion(t), "rules");
   }
 
   if (!projectId) return NextResponse.json({ error: "projectId required" }, { status: 400 });
@@ -157,6 +163,7 @@ export async function POST(req: Request) {
           | "dayplan"
           | "weekplan"
           | "weekreport"
+          | "enterprise_pulse"
           | "project"
           | "project_deep"
           | "risk"
@@ -170,63 +177,65 @@ export async function POST(req: Request) {
         projectName: project.name,
         tasks,
       });
-      return NextResponse.json({ result: ai });
+      return jsonResult(ai, "openrouter");
     } catch {
       // fallback to rule engine
     }
   }
 
-  if (kind === "daily") return NextResponse.json({ result: buildDailyReport(project, tasks) });
-  if (kind === "weekly") return NextResponse.json({ result: buildWeeklyReport(project, tasks) });
-  if (kind === "dayplan") return NextResponse.json({ result: buildDayplanFallback(project, tasks) });
-  if (kind === "weekplan") return NextResponse.json({ result: buildWeekplanNaturalFallback(project, tasks) });
-  if (kind === "weekreport") return NextResponse.json({ result: buildWeekReportFallback(project, tasks) });
+  if (kind === "daily") return jsonResult(buildDailyReport(project, tasks), "rules");
+  if (kind === "weekly") return jsonResult(buildWeeklyReport(project, tasks), "rules");
+  if (kind === "dayplan") return jsonResult(buildDayplanFallback(project, tasks), "rules");
+  if (kind === "weekplan") return jsonResult(buildWeekplanNaturalFallback(project, tasks), "rules");
+  if (kind === "weekreport") return jsonResult(buildWeekReportFallback(project, tasks), "rules");
 
   if (kind === "project") {
     const done = tasks.filter((t) => t.status === "done").length;
     const rate = tasks.length ? Math.round((done / tasks.length) * 1000) / 10 : 0;
-    return NextResponse.json({
-      result: {
+    return jsonResult(
+      {
         title: `${project.name} — 项目总结`,
         completion: rate,
         risk: buildRiskAnalysis(tasks),
         narrative: `共 ${tasks.length} 项任务，完成率 ${rate}%。`,
       },
-    });
+      "rules",
+    );
   }
 
   if (kind === "project_deep") {
-    return NextResponse.json({ result: buildProjectDeepSummary(project, tasks) });
+    return jsonResult(buildProjectDeepSummary(project, tasks), "rules");
   }
-  if (kind === "risk") return NextResponse.json({ result: buildRiskAnalysis(tasks) });
-  if (kind === "risk_predict") return NextResponse.json({ result: buildRiskPredict(tasks) });
+  if (kind === "risk") return jsonResult(buildRiskAnalysis(tasks), "rules");
+  if (kind === "risk_predict") return jsonResult(buildRiskPredict(tasks), "rules");
   if (kind === "next_actions") {
     const top = tasks
       .filter((t) => t.status !== "done")
       .sort((a, b) => (a.priority > b.priority ? -1 : 1))
       .slice(0, 6)
       .map((t) => t.title);
-    return NextResponse.json({ result: { type: "next_actions", next24h: top.slice(0, 3), next3d: top } });
+    return jsonResult({ type: "next_actions", next24h: top.slice(0, 3), next3d: top }, "rules");
   }
   if (kind === "retro") {
     const done = tasks.filter((t) => t.status === "done").map((t) => t.title).slice(0, 5);
     const blocked = tasks.filter((t) => t.status === "blocked").map((t) => t.title).slice(0, 5);
-    return NextResponse.json({
-      result: {
+    return jsonResult(
+      {
         type: "retro",
         whatWentWell: done,
         whatToImprove: blocked,
         actionItems: blocked.map((b) => ({ item: `解决：${b}`, owner: "", deadline: "" })),
       },
-    });
+      "rules",
+    );
   }
 
   if (kind === "standup") {
-    return NextResponse.json({ result: buildStandup(project, tasks) });
+    return jsonResult(buildStandup(project, tasks), "rules");
   }
 
   if (kind === "executive_brief") {
-    return NextResponse.json({ result: buildExecutiveBrief(project, tasks) });
+    return jsonResult(buildExecutiveBrief(project, tasks), "rules");
   }
 
   if (kind === "workload") {
@@ -237,13 +246,18 @@ export async function POST(req: Request) {
     });
     const sorted = [...byAssignee].sort((a, b) => b._count._all - a._count._all);
     const overload = sorted.filter((x) => x._count._all >= 5);
-    return NextResponse.json({
-      result: {
+    return jsonResult(
+      {
         distribution: sorted.map((s) => ({ assigneeId: s.assigneeId, open: s._count._all })),
         overload,
         suggestion: overload.length > 0 ? "部分成员待办较多，建议平衡或拆分任务。" : "负载相对均衡。",
       },
-    });
+      "rules",
+    );
+  }
+
+  if (kind === "enterprise_pulse") {
+    return jsonResult(buildEnterprisePulseFallback(project, tasks), "rules");
   }
 
   return NextResponse.json({ error: "Unknown" }, { status: 400 });
