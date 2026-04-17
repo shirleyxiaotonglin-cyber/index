@@ -5,6 +5,116 @@ type TaskLite = Pick<
   "title" | "status" | "priority" | "deadline" | "startTime"
 >;
 
+function priorityRank(p: string): number {
+  const u = String(p || "P2").toUpperCase();
+  if (u.startsWith("P0")) return 0;
+  if (u.startsWith("P1")) return 1;
+  if (u.startsWith("P2")) return 2;
+  if (u.startsWith("P3")) return 3;
+  return 2;
+}
+
+/** 今日计划：开始或截止为今天的未完成任务（OpenRouter 失败时回退） */
+export function buildDayplanFallback(project: Pick<Project, "name">, tasks: TaskLite[]) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayStr = today.toISOString().slice(0, 10);
+  const cand = tasks.filter((t) => {
+    if (t.status === "done") return false;
+    const dl = t.deadline ? new Date(t.deadline) : null;
+    const st = t.startTime ? new Date(t.startTime) : null;
+    const dls = dl ? dl.toISOString().slice(0, 10) : "";
+    const sts = st ? st.toISOString().slice(0, 10) : "";
+    return dls === todayStr || sts === todayStr;
+  });
+  cand.sort((a, b) => priorityRank(String(a.priority)) - priorityRank(String(b.priority)));
+  return {
+    type: "dayplan" as const,
+    projectName: project.name,
+    today: todayStr,
+    items: cand.map((t) => {
+      const dl = t.deadline ? new Date(t.deadline).toISOString().slice(0, 10) : "";
+      return {
+        title: t.title,
+        priority: t.priority,
+        mark: dl === todayStr ? "截止今日" : "开始今日",
+      };
+    }),
+    suggestions:
+      cand.length === 0
+        ? ["今日暂无开始或截止落在今天的未完成任务"]
+        : ["优先处理 P0/P1 且今日截止项", "大块任务拆成可验收步骤"],
+  };
+}
+
+/** 本周计划：自然周按 deadline 分组（OpenRouter 失败时回退） */
+export function buildWeekplanNaturalFallback(project: Pick<Project, "name">, tasks: TaskLite[]) {
+  const now = new Date();
+  const d = now.getDay();
+  const diff = (d === 0 ? -6 : 1) - d;
+  const mon = new Date(now);
+  mon.setDate(now.getDate() + diff);
+  mon.setHours(0, 0, 0, 0);
+  const dayNames = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+  const byDay: { date: string; label: string; tasks: string[] }[] = [];
+  for (let di = 0; di < 7; di++) {
+    const dt = new Date(mon);
+    dt.setDate(mon.getDate() + di);
+    const ds = dt.toISOString().slice(0, 10);
+    const due = tasks.filter(
+      (t) =>
+        t.status !== "done" &&
+        t.deadline &&
+        new Date(t.deadline).toISOString().slice(0, 10) === ds,
+    );
+    due.sort((a, b) => priorityRank(String(a.priority)) - priorityRank(String(b.priority)));
+    byDay.push({
+      date: ds,
+      label: dayNames[di],
+      tasks: due.map((t) => `${t.title} [${t.priority}]`),
+    });
+  }
+  return {
+    type: "weekplan" as const,
+    projectName: project.name,
+    weekStart: mon.toISOString().slice(0, 10),
+    byDay,
+    summary: "按自然周与 deadline 分组（仅未完成）。",
+  };
+}
+
+/** 本周工作报告摘要（OpenRouter 失败时回退） */
+export function buildWeekReportFallback(project: Pick<Project, "name">, tasks: TaskLite[]) {
+  const n = tasks.length;
+  const done = tasks.filter((t) => t.status === "done").length;
+  const risk = buildRiskAnalysis(tasks);
+  return {
+    type: "weekreport" as const,
+    title: `${project.name} — 本周工作报告`,
+    overview: `共 ${n} 项任务，已完成 ${done} 项；未完成 ${n - done} 项。`,
+    sections: [
+      {
+        heading: "风险与延期",
+        bullets: [
+          ...(risk.overdueTasks.length
+            ? [`延期 ${risk.overdueTasks.length} 项（示例：${risk.overdueTasks[0]?.title ?? ""}）`]
+            : ["当前无延期项"]),
+          ...(risk.blockedTasks.length
+            ? [`阻塞 ${risk.blockedTasks.length} 项`]
+            : ["当前无阻塞项"]),
+        ],
+      },
+      {
+        heading: "高优先级未完成",
+        bullets: risk.highPriorityOpen.slice(0, 8).length
+          ? risk.highPriorityOpen.slice(0, 8)
+          : ["无 P0 未完成"],
+      },
+    ],
+    note: "以上为规则引擎生成的结构化摘要；接入 OpenRouter 后可输出更长汇报正文。",
+  };
+}
+
 export function buildDailyReport(
   project: Pick<Project, "name">,
   tasks: TaskLite[],

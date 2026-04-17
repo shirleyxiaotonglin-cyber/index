@@ -12,6 +12,9 @@ import {
   buildRiskPredict,
   buildStandup,
   buildExecutiveBrief,
+  buildDayplanFallback,
+  buildWeekplanNaturalFallback,
+  buildWeekReportFallback,
 } from "@/lib/ai-mock";
 import { hasOpenRouterKey } from "@/lib/openai";
 import { runTypedAi } from "@/lib/ai-typed-openai";
@@ -29,6 +32,9 @@ const bodySchema = z.object({
   kind: z.enum([
     "daily",
     "weekly",
+    "dayplan",
+    "weekplan",
+    "weekreport",
     "project",
     "project_deep",
     "risk",
@@ -148,6 +154,9 @@ export async function POST(req: Request) {
         kind: kind as
           | "daily"
           | "weekly"
+          | "dayplan"
+          | "weekplan"
+          | "weekreport"
           | "project"
           | "project_deep"
           | "risk"
@@ -169,6 +178,9 @@ export async function POST(req: Request) {
 
   if (kind === "daily") return NextResponse.json({ result: buildDailyReport(project, tasks) });
   if (kind === "weekly") return NextResponse.json({ result: buildWeeklyReport(project, tasks) });
+  if (kind === "dayplan") return NextResponse.json({ result: buildDayplanFallback(project, tasks) });
+  if (kind === "weekplan") return NextResponse.json({ result: buildWeekplanNaturalFallback(project, tasks) });
+  if (kind === "weekreport") return NextResponse.json({ result: buildWeekReportFallback(project, tasks) });
 
   if (kind === "project") {
     const done = tasks.filter((t) => t.status === "done").length;

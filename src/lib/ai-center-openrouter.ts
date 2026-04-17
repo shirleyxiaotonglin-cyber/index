@@ -3,6 +3,9 @@ import { chatJsonWithSystem } from "@/lib/openai";
 type Kind =
   | "daily"
   | "weekly"
+  | "dayplan"
+  | "weekplan"
+  | "weekreport"
   | "project"
   | "project_deep"
   | "risk"
@@ -59,11 +62,14 @@ function systemFor(kind: Kind): string {
   const shared =
     "你是项目管理 AI 助手。仅输出一个 JSON 对象，不要 Markdown，不要代码围栏。内容使用中文，结论可执行。";
   const map: Record<Kind, string> = {
-    daily: `${shared} 结构：{"type":"daily","items":[{"owner":string,"focus":string,"tasks":string[]}],"summary":string}`,
+    daily: `${shared} 生成「今日工作报告」。结构：{"type":"daily","items":[{"owner":string,"focus":string,"tasks":string[]}],"summary":string}`,
     weekly: `${shared} 结构：{"type":"weekly","goals":string[],"milestones":string[],"risks":string[],"summary":string}`,
+    dayplan: `${shared} 生成「今日计划」：未完成且开始日或截止日为「今日」的任务。结构：{"type":"dayplan","today":string,"items":[{"title":string,"priority":string,"mark":string}],"suggestions":string[]}`,
+    weekplan: `${shared} 生成「本周计划」：自然周周一至周日，按 deadline 将未完成任务归到各日。结构：{"type":"weekplan","weekStart":string,"byDay":[{"date":string,"label":string,"tasks":string[]}],"summary":string}`,
+    weekreport: `${shared} 生成「本周工作报告」：含概况、进展、风险、本周节点、下周关注。结构：{"type":"weekreport","title":string,"overview":string,"sections":[{"heading":string,"bullets":string[]}],"risks":string[],"nextFocus":string[]}`,
     project: `${shared} 结构：{"type":"project","title":string,"completion":number,"highlights":string[],"risks":string[],"next":string[]}`,
     project_deep: `${shared} 结构：{"type":"project_deep","bottlenecks":string[],"efficiencyIssues":string[],"dependencies":string[],"actions":string[]}`,
-    risk: `${shared} 结构：{"type":"risk","topRisks":[{"risk":string,"impact":"high|medium|low","owner":string,"mitigation":string}]}`,
+    risk: `${shared} 生成「项目管理风险分析」。结构：{"type":"risk","topRisks":[{"risk":string,"impact":"high|medium|low","owner":string,"mitigation":string}]}`,
     risk_predict: `${shared} 结构：{"type":"risk_predict","delayCandidates":[{"task":string,"probability":number,"reason":string,"suggestion":string}],"summary":string}`,
     workload: `${shared} 结构：{"type":"workload","distribution":[{"owner":string,"open":number}],"overload":string[],"rebalancing":string[]}`,
     decompose: `${shared} 结构：{"type":"decompose","summary":string,"tasks":[{"title":string,"description":string,"suggestedAssignee":string,"suggestedDeadline":string,"priority":"P0|P1|P2|P3","order":number}]}`,
@@ -87,6 +93,7 @@ export async function runAiCenterKind(params: {
   const { kind, projectId, projectName, tasks, title, task } = params;
   const baseCtx =
     `项目ID: ${projectId}\n项目名: ${projectName}\n` +
+    `今日日期(YYYY-MM-DD): ${new Date().toISOString().slice(0, 10)}\n` +
     `任务总数: ${tasks.length}\n\n` +
     `任务清单:\n${buildTaskContext(tasks)}`;
   const taskCtx = task

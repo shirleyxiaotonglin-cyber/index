@@ -11,6 +11,9 @@ import { Label } from "@/components/ui/label";
 type Kind =
   | "daily"
   | "weekly"
+  | "dayplan"
+  | "weekplan"
+  | "weekreport"
   | "project"
   | "project_deep"
   | "risk"
@@ -118,12 +121,20 @@ function AiInner() {
         </CardContent>
       </Card>
 
+      <p className="text-sm font-medium text-muted-foreground">今日 / 本周 · OpenRouter 优先，失败回退规则</p>
       <div className="grid gap-4 md:grid-cols-2">
+        {cell("今日计划", "dayplan")}
+        {cell("本周计划", "weekplan")}
         {cell("今日工作报告", "daily")}
-        {cell("本周工作报告", "weekly")}
+        {cell("本周工作报告", "weekreport")}
+        {cell("项目管理风险", "risk")}
+      </div>
+
+      <p className="mt-8 text-sm font-medium text-muted-foreground">更多分析</p>
+      <div className="grid gap-4 md:grid-cols-2">
+        {cell("周报（目标/里程碑）", "weekly")}
         {cell("项目总结", "project")}
         {cell("项目深度总结（风险·瓶颈·效率）", "project_deep")}
-        {cell("项目管理风险", "risk")}
         {cell("风险预测（延期·关键路径）", "risk_predict")}
         {cell("工作负载", "workload")}
         {cell("下一步行动（24h / 3d）", "next_actions")}
