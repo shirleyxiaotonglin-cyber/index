@@ -9,17 +9,23 @@ function setCors(res) {
 
 var PROMPTS = {
   daily:
-    "你是项目管理助手，输出使用中文。使用纯文本，不要用 Markdown 代码围栏。可分段落与「-」列表，简洁可执行。 生成「日报」：汇总今日重点事项与执行状态；基于任务状态统计（完成/进行中/阻塞/待办等），并给出 1～3 条简短建议。",
+    "你是项目管理助手，输出使用中文。使用纯文本，不要用 Markdown 代码围栏。可分段落与「-」列表，简洁可执行。 生成「今日工作报告」：汇总今日重点事项与执行状态；基于任务状态统计（完成/进行中/阻塞/待办等），并给出 1～3 条可执行建议。",
   dayplan:
     "你是项目管理助手，输出使用中文。使用纯文本，不要用 Markdown 代码围栏。 生成「今日计划」：只关注未完成任务中，开始日或截止日为「今天」的任务；按优先级（P0 优先）与 deadline 排序；若无则说明并给轻量建议。",
   weekplan:
     "你是项目管理助手，输出使用中文。使用纯文本，不要用 Markdown 代码围栏。 生成「本周计划」：自然周为「本周一～本周日」；按未完成任务中有 deadline 的日期分组列出；若某天无任务可省略该天。",
   risk:
-    "你是项目管理助手，输出使用中文。使用纯文本，不要用 Markdown 代码围栏。 生成「风险摘要」：识别延期（deadline 早于今日且未完成）、阻塞、未完成 P0 等；每条尽量带任务标题。",
+    "你是项目管理助手，输出使用中文。使用纯文本，不要用 Markdown 代码围栏。 生成「项目管理风险分析」：从延期、阻塞、资源与高优先级缺口等角度分析；列出具体任务标题与缓解思路；勿编造数据中不存在的任务。",
   weekreport:
-    "你是项目管理助手，输出使用中文。使用纯文本，不要用 Markdown 代码围栏。 生成「周度工作报告」：结构参考——一、总体概况；二、项目进展（按项目）；三、完成工作；四、风险与延期；五、本周关键节点；六、下周关注点。数据须与下方 JSON 一致，勿编造任务。",
+    "你是项目管理助手，输出使用中文。使用纯文本，不要用 Markdown 代码围栏。 生成「本周工作报告」：结构参考——一、总体概况；二、项目进展（按项目）；三、完成工作；四、风险与延期；五、本周关键节点；六、下周关注点。数据须与下方 JSON 一致，勿编造任务。",
   decompose:
     "你是项目管理助手，输出使用中文。使用纯文本，不要用 Markdown 代码围栏。 生成「任务拆解」：为给定父任务标题输出 4～8 条可执行子任务（含序号），可含角色/优先级建议。",
+  schedule_daily:
+    "你是项目管理助手，输出使用中文。使用纯文本，不要用 Markdown 代码围栏。 生成「今日工作/日度计划」：基于未完成任务。依次覆盖：①已延期项（优先）；②今日焦点（开始或截止为今日）；③未来 7 日内截止；④无截止日期但进行中/阻塞/评审。最后给简短节奏建议。数据须与 JSON 一致。",
+  schedule_weekly:
+    "你是项目管理助手，输出使用中文。使用纯文本，不要用 Markdown 代码围栏。 生成「本周工作计划表」：按「视图周」周一至周日（见 meta.viewWeekStart～viewWeekEnd）列出每日有开始或截止落点的任务；若某日无落点可写「当日无开始/截止落点」。与周历视图一致。勿编造任务。",
+  schedule_todo:
+    "你是项目管理助手，输出使用中文。使用纯文本，不要用 Markdown 代码围栏。 生成「待办清单」：排序规则为延期优先 → 截止日升序 → 优先级；每条一行，含标题、优先级、截止、状态。",
 };
 
 function buildUser(kind, body) {
@@ -30,6 +36,8 @@ function buildUser(kind, body) {
       today: String(body.today || ""),
       weekStart: String(body.weekStart || ""),
       weekEnd: String(body.weekEnd || ""),
+      viewWeekStart: String(body.viewWeekStart || ""),
+      viewWeekEnd: String(body.viewWeekEnd || ""),
       userName: String(body.userName || ""),
     },
     projects: Array.isArray(body.projects) ? body.projects : [],
@@ -48,7 +56,11 @@ function buildUser(kind, body) {
   if (kind === "decompose") {
     return "待拆解父任务标题：" + String(body.title || "").trim() + "\n\n上下文（JSON）：\n" + JSON.stringify(compact);
   }
-  return '请根据以下 JSON 中的任务与项目数据完成「' + kind + "」输出。\n\n" + JSON.stringify(compact);
+  var scope =
+    kind === "schedule_daily" || kind === "schedule_weekly" || kind === "schedule_todo"
+      ? "（tasks 为当前日程筛选下的未完成任务快照）\n\n"
+      : "";
+  return scope + "请根据以下 JSON 中的任务与项目数据完成输出。\n\n" + JSON.stringify(compact);
 }
 
 module.exports = async function handler(req, res) {
@@ -64,7 +76,17 @@ module.exports = async function handler(req, res) {
   } catch (e) {
     return res.status(400).json({ ok: false, error: "请求体须为 JSON" });
   }
-  var kinds = ["daily", "dayplan", "weekplan", "risk", "weekreport", "decompose"];
+  var kinds = [
+    "daily",
+    "dayplan",
+    "weekplan",
+    "risk",
+    "weekreport",
+    "decompose",
+    "schedule_daily",
+    "schedule_weekly",
+    "schedule_todo",
+  ];
   var kind = String(body.kind || "");
   if (kinds.indexOf(kind) < 0) return res.status(400).json({ ok: false, error: "kind 无效" });
   if (kind === "decompose" && !String(body.title || "").trim()) {
@@ -95,6 +117,7 @@ module.exports = async function handler(req, res) {
   if (xt) hdr["X-Title"] = xt.slice(0, 120);
 
   var system = PROMPTS[kind];
+  if (!system) return res.status(400).json({ ok: false, error: "kind 无对应提示词" });
   var user = buildUser(kind, body);
   var r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",

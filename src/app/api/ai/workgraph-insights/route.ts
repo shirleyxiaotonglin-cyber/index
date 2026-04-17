@@ -35,7 +35,17 @@ export async function POST(req: Request) {
   }
   const o = json as Record<string, unknown>;
   const kind = o.kind as WorkgraphKind | undefined;
-  const kinds: WorkgraphKind[] = ["daily", "dayplan", "weekplan", "risk", "weekreport", "decompose"];
+  const kinds: WorkgraphKind[] = [
+    "daily",
+    "dayplan",
+    "weekplan",
+    "risk",
+    "weekreport",
+    "decompose",
+    "schedule_daily",
+    "schedule_weekly",
+    "schedule_todo",
+  ];
   if (!kind || !kinds.includes(kind)) {
     return withCors(NextResponse.json({ ok: false, error: "kind 无效" }, { status: 400 }));
   }
@@ -44,6 +54,8 @@ export async function POST(req: Request) {
     today: String(o.today || "").slice(0, 16),
     weekStart: String(o.weekStart || "").slice(0, 16),
     weekEnd: String(o.weekEnd || "").slice(0, 16),
+    viewWeekStart: typeof o.viewWeekStart === "string" ? o.viewWeekStart.slice(0, 16) : undefined,
+    viewWeekEnd: typeof o.viewWeekEnd === "string" ? o.viewWeekEnd.slice(0, 16) : undefined,
     userName: typeof o.userName === "string" ? o.userName : undefined,
     projects: Array.isArray(o.projects) ? (o.projects as WorkgraphInsightInput["projects"]) : [],
     tasks: Array.isArray(o.tasks) ? (o.tasks as WorkgraphInsightInput["tasks"]) : [],

@@ -119,11 +119,11 @@ function AiInner() {
       </Card>
 
       <div className="grid gap-4 md:grid-cols-2">
-        {cell("每日进度", "daily")}
-        {cell("周报", "weekly")}
+        {cell("今日工作报告", "daily")}
+        {cell("本周工作报告", "weekly")}
         {cell("项目总结", "project")}
         {cell("项目深度总结（风险·瓶颈·效率）", "project_deep")}
-        {cell("风险分析", "risk")}
+        {cell("项目管理风险", "risk")}
         {cell("风险预测（延期·关键路径）", "risk_predict")}
         {cell("工作负载", "workload")}
         {cell("下一步行动（24h / 3d）", "next_actions")}
