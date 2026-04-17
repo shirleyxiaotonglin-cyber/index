@@ -4581,6 +4581,12 @@
     };
   }
 
+  var MEETING_AI_CLIENT_MAX_WAIT_MS = 60000;
+  var MEETING_AI_CLIENT_RETRY_STEP_MS = 15000;
+  function isMeetingAiRateLimitedMessage(msg) {
+    var s = String(msg || "");
+    return /(?:^|[^0-9])429(?:[^0-9]|$)|rate-?limit|temporarily rate-limited|Provider returned error/i.test(s);
+  }
   function parseMeetingTextWithAI(text, done) {
     if (!canUseAiMeetingParse()) {
       done({ err: "AI 已禁用（页面设置了 DISABLE_MEETING_AI）。" });
@@ -4598,49 +4604,64 @@
       done({ err: "正文在去前言后为空，请保留至少含「任务1：」或「#」标题的排期段落。" });
       return;
     }
-    meetingAiFetch("/api/ai/parse-meeting", { method: "POST", body: { text: txtAi } })
-      .then(function (r) {
-        return r.text().then(function (bodyText) {
-          var j = null;
-          try {
-            j = bodyText && bodyText.length ? JSON.parse(bodyText) : {};
-          } catch (parseErr) {
-            j = {
-              ok: false,
-              error: "服务器返回非 JSON（HTTP " + r.status + "）",
-              detail: String(bodyText || "").slice(0, 240),
-            };
-          }
-          return { ok: r.ok, status: r.status, data: j };
-        });
-      })
-      .then(function (res) {
-        if (!res.ok && res.status === 404) {
-          done({
-            err:
-              "API 不存在（404）。请确认：① Vercel 等公网部署已包含 /api/ai/parse-meeting；② 本地已运行 task-server（默认 3780）且页面与 API 同址；③ 若端口不一致，可执行：localStorage.setItem(\"workgraph_api_base\",\"http://主机:端口\") 后刷新。",
+    var startedAt = Date.now();
+    function run() {
+      meetingAiFetch("/api/ai/parse-meeting", { method: "POST", body: { text: txtAi } })
+        .then(function (r) {
+          return r.text().then(function (bodyText) {
+            var j = null;
+            try {
+              j = bodyText && bodyText.length ? JSON.parse(bodyText) : {};
+            } catch (parseErr) {
+              j = {
+                ok: false,
+                error: "服务器返回非 JSON（HTTP " + r.status + "）",
+                detail: String(bodyText || "").slice(0, 240),
+              };
+            }
+            return { ok: r.ok, status: r.status, data: j };
           });
-          return;
-        }
-        if (!res.ok || !res.data || !res.data.ok || !res.data.parsed) {
-          var msg = (res.data && res.data.error) || "AI 解析失败";
-          if (res.data && res.data.detail) msg += "：" + res.data.detail;
-          if (!res.ok && res.status === 401) msg = "未登录或会话失效，请重新登录后再试 AI 解析。";
-          if (!res.ok && res.status === 503) msg = (res.data && res.data.error) || msg;
-          done({ err: msg });
-          return;
-        }
-        done({ parsed: normalizeAiMeetingParsed(res.data.parsed) });
-      })
-      .catch(function (e) {
-        var hint = e && e.message ? String(e.message) : String(e);
-        done({
-          err:
+        })
+        .then(function (res) {
+          if (!res.ok && res.status === 404) {
+            done({
+              err:
+                "API 不存在（404）。请确认：① Vercel 等公网部署已包含 /api/ai/parse-meeting；② 本地已运行 task-server（默认 3780）且页面与 API 同址；③ 若端口不一致，可执行：localStorage.setItem(\"workgraph_api_base\",\"http://主机:端口\") 后刷新。",
+            });
+            return;
+          }
+          if (!res.ok || !res.data || !res.data.ok || !res.data.parsed) {
+            var msg = (res.data && res.data.error) || "AI 解析失败";
+            if (res.data && res.data.detail) msg += "：" + res.data.detail;
+            if (!res.ok && res.status === 401) msg = "未登录或会话失效，请重新登录后再试 AI 解析。";
+            if (!res.ok && res.status === 503) msg = (res.data && res.data.error) || msg;
+            var elapsed = Date.now() - startedAt;
+            if (isMeetingAiRateLimitedMessage(msg) && elapsed < MEETING_AI_CLIENT_MAX_WAIT_MS) {
+              var waitMs = Math.min(MEETING_AI_CLIENT_RETRY_STEP_MS, MEETING_AI_CLIENT_MAX_WAIT_MS - elapsed);
+              setTimeout(run, waitMs);
+              return;
+            }
+            done({ err: msg });
+            return;
+          }
+          done({ parsed: normalizeAiMeetingParsed(res.data.parsed) });
+        })
+        .catch(function (e) {
+          var hint = e && e.message ? String(e.message) : String(e);
+          var msg =
             "请求失败（" +
             hint +
-            "）。请确认：① 通过 http(s) 打开；② 公网部署已在服务端配置 OPENROUTER_API_KEY；③ 本地 task-server 已启动且 OPENROUTER_API_KEY 已设置。",
+            "）。请确认：① 通过 http(s) 打开；② 公网部署已在服务端配置 OPENROUTER_API_KEY；③ 本地 task-server 已启动且 OPENROUTER_API_KEY 已设置。";
+          var elapsed = Date.now() - startedAt;
+          if (isMeetingAiRateLimitedMessage(hint) && elapsed < MEETING_AI_CLIENT_MAX_WAIT_MS) {
+            var waitMs = Math.min(MEETING_AI_CLIENT_RETRY_STEP_MS, MEETING_AI_CLIENT_MAX_WAIT_MS - elapsed);
+            setTimeout(run, waitMs);
+            return;
+          }
+          done({ err: msg });
         });
-      });
+    }
+    run();
   }
 
   function formatMeetingPreview(p) {
