@@ -4692,6 +4692,10 @@
 
   function applyMeetingImport(parsed, mode, projectId, flags) {
     flags = flags || {};
+    function asText(v) {
+      if (v === null || v === undefined) return "";
+      return String(v).trim();
+    }
     var uname = state.userName;
     var targetId = projectId;
     var proj;
@@ -4747,20 +4751,20 @@
       var t = {
         id: uid(),
         projectId: targetId,
-        title: String(pt.title).trim().slice(0, 500),
-        description: (pt.description || "").trim(),
+        title: asText(pt.title).slice(0, 500),
+        description: asText(pt.description),
         status: pt.status || "todo",
         priority: pt.priority || "P2",
-        assignee: (pt.assignee || "").trim() || uname,
-        collaborators: (pt.collaborators || "").trim(),
+        assignee: asText(pt.assignee) || uname,
+        collaborators: asText(pt.collaborators),
         createdBy: uname,
         parentId: null,
         pipelineStage: ch ? 0 : ps,
         startTime: "",
-        deadline: pt.deadline || "",
+        deadline: asText(pt.deadline),
         estimatedHours: "",
         actualHours: "",
-        tags: (pt.tags || "").trim(),
+        tags: asText(pt.tags),
       };
       if (ch) {
         t.pipelineStage = 0;
