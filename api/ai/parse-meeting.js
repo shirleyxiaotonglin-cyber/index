@@ -56,8 +56,8 @@ module.exports = async function handler(req, res) {
     });
   }
   const base = "https://openrouter.ai/api/v1";
-  var DEFAULT_MR_MODEL = "meta-llama/llama-3.3-70b-instruct:free";
-  var FALLBACKS = ["openrouter/free", "meta-llama/llama-3.2-3b-instruct:free"];
+  var DEFAULT_MR_MODEL = "openrouter/free";
+  var FALLBACKS = ["meta-llama/llama-3.2-3b-instruct:free", "meta-llama/llama-3.3-70b-instruct:free"];
   var RATE_MS = 2800;
   var rawModel = String(
     process.env.OPENROUTER_MEETING_MODEL || process.env.OPENROUTER_MODEL || ""
@@ -78,6 +78,9 @@ module.exports = async function handler(req, res) {
       seen[m] = true;
       models.push(m);
     }
+  }
+  if (primary === "meta-llama/llama-3.3-70b-instruct:free") {
+    pushModel("openrouter/free");
   }
   pushModel(primary);
   for (var fi = 0; fi < FALLBACKS.length; fi++) pushModel(FALLBACKS[fi]);
@@ -106,14 +109,13 @@ module.exports = async function handler(req, res) {
     var err = data.error;
     var hasC = data.choices && data.choices.length;
     if (err && !hasC) {
-      var em = (err.message || "") + JSON.stringify(err);
-      if (
+      var metaRaw = err.metadata && err.metadata.raw ? String(err.metadata.raw) : "";
+      var blob = raw + " " + (err.message || "") + " " + metaRaw;
+      var isRl =
         err.code === 429 ||
-        /rate-?limit|temporarily rate-limited|429/i.test(em) ||
-        /rate-?limit|temporarily rate-limited/i.test(raw)
-      ) {
-        return { kind: "rl" };
-      }
+        /rate-?limit|temporarily rate-limited|"code"\s*:\s*429/i.test(blob) ||
+        (err.message === "Provider returned error" && /429|rate-?limit|temporarily/i.test(blob));
+      if (isRl) return { kind: "rl" };
       return { kind: "err", detail: raw.slice(0, 400) };
     }
     var c0 = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
