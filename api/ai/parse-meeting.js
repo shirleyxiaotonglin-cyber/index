@@ -102,6 +102,13 @@ module.exports = async function handler(req, res) {
     var idx = Math.min(round, BACKOFF.length - 1);
     return BACKOFF[idx];
   }
+  function extractExhaustedModel(raw) {
+    var m = String(raw || "").match(/limit_rpm\/([^/\s]+\/[^/\s]+)\//i);
+    if (m && m[1]) return String(m[1]).trim();
+    var alt = String(raw || "").match(/high demand for\s+([a-z0-9._-]+\/[a-z0-9._-]+):free/i);
+    if (alt && alt[1]) return String(alt[1]).trim() + ":free";
+    return "";
+  }
   function parseChatJson(raw) {
     var data;
     try {
@@ -118,7 +125,7 @@ module.exports = async function handler(req, res) {
         err.code === 429 ||
         /rate-?limit|temporarily rate-limited|"code"\s*:\s*429/i.test(blob) ||
         (err.message === "Provider returned error" && /429|rate-?limit|temporarily/i.test(blob));
-      if (isRl) return { kind: "rl" };
+      if (isRl) return { kind: "rl", exhaustedModel: extractExhaustedModel(blob) };
       return { kind: "err", detail: raw.slice(0, 400) };
     }
     var c0 = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
@@ -137,10 +144,12 @@ module.exports = async function handler(req, res) {
 
   var lastDetail = "";
   var sawRateLimit = false;
+  var blockedModels = {};
   var mi, round;
   for (round = 0; round < MAX_ROUNDS; round++) {
     var roundHitRateLimit = false;
     for (mi = 0; mi < models.length; mi++) {
+      if (blockedModels[models[mi]]) continue;
       var r = await fetch(base + "/chat/completions", {
         method: "POST",
         headers: hdr,
@@ -159,6 +168,9 @@ module.exports = async function handler(req, res) {
         lastDetail = raw.slice(0, 400);
         if (httpRl(r.status, raw)) {
           roundHitRateLimit = true;
+          var exhausted = extractExhaustedModel(raw);
+          if (exhausted) blockedModels[exhausted] = true;
+          if (/x-ratelimit-remaining"\s*:\s*"0"/i.test(raw)) blockedModels[models[mi]] = true;
           continue;
         }
         continue;
@@ -176,6 +188,8 @@ module.exports = async function handler(req, res) {
       if (pr.kind === "rl") {
         lastDetail = raw.slice(0, 400);
         roundHitRateLimit = true;
+        if (pr.exhaustedModel) blockedModels[pr.exhaustedModel] = true;
+        if (/x-ratelimit-remaining"\s*:\s*"0"/i.test(raw)) blockedModels[models[mi]] = true;
         continue;
       }
       lastDetail = pr.detail || raw.slice(0, 400);

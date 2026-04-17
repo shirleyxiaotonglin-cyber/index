@@ -110,7 +110,7 @@ function backoffMs(round: number): number {
 
 type ChatJson =
   | { kind: "message"; content: string }
-  | { kind: "rate_limited" }
+  | { kind: "rate_limited"; exhaustedModel?: string }
   | { kind: "empty_or_error"; detail: string };
 
 function isRateLimitedOpenRouterError(
@@ -125,6 +125,14 @@ function isRateLimitedOpenRouterError(
     /rate-?limit|temporarily rate-limited|"code"\s*:\s*429/i.test(blob) ||
     (err.message === "Provider returned error" && /429|rate-?limit|temporarily/i.test(blob))
   );
+}
+
+function extractExhaustedModel(raw: string): string | undefined {
+  const m = raw.match(/limit_rpm\/([^/\s]+\/[^/\s]+)\//i);
+  if (m && m[1]) return m[1].trim();
+  const alt = raw.match(/high demand for\s+([a-z0-9._-]+\/[a-z0-9._-]+):free/i);
+  if (alt && alt[1]) return `${alt[1].trim()}:free`;
+  return undefined;
 }
 
 /** 解析 OpenRouter chat 响应：成功正文 / 限流 / 其它错误 */
@@ -143,7 +151,7 @@ function parseChatCompletionJson(raw: string): ChatJson {
   const hasChoices = Array.isArray(d.choices) && d.choices.length > 0;
   if (err && !hasChoices) {
     if (isRateLimitedOpenRouterError(raw, err)) {
-      return { kind: "rate_limited" };
+      return { kind: "rate_limited", exhaustedModel: extractExhaustedModel(raw) };
     }
     return { kind: "empty_or_error", detail: raw.slice(0, 400) };
   }
@@ -169,6 +177,7 @@ export async function parseMeetingWithAi(text: string): Promise<MeetingParseResu
   }
   const base = "https://openrouter.ai/api/v1";
   const models = uniqModelOrder(resolveMeetingModelId());
+  const blockedModels = new Set<string>();
   let lastDetail = "";
 
   const messages = [
@@ -183,6 +192,7 @@ export async function parseMeetingWithAi(text: string): Promise<MeetingParseResu
   for (let round = 0; round < MAX_RATE_LIMIT_ROUNDS; round++) {
     let roundHitRateLimit = false;
     for (const model of models) {
+      if (blockedModels.has(model)) continue;
       const body = {
         model,
         temperature: 0.2,
@@ -206,6 +216,9 @@ export async function parseMeetingWithAi(text: string): Promise<MeetingParseResu
         lastDetail = raw.slice(0, 400);
         if (isHttpRateLimited(res.status, raw)) {
           roundHitRateLimit = true;
+          const exhausted = extractExhaustedModel(raw);
+          if (exhausted) blockedModels.add(exhausted);
+          if (/x-ratelimit-remaining"\s*:\s*"0"/i.test(raw)) blockedModels.add(model);
           continue;
         }
         continue;
@@ -225,6 +238,8 @@ export async function parseMeetingWithAi(text: string): Promise<MeetingParseResu
       if (parsed.kind === "rate_limited") {
         lastDetail = raw.slice(0, 400);
         roundHitRateLimit = true;
+        if (parsed.exhaustedModel) blockedModels.add(parsed.exhaustedModel);
+        if (/x-ratelimit-remaining"\s*:\s*"0"/i.test(raw)) blockedModels.add(model);
         continue;
       }
 
