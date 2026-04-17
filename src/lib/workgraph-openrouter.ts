@@ -36,6 +36,9 @@ export type WorkgraphInsightInput = {
   today: string;
   weekStart: string;
   weekEnd: string;
+  /** 下一自然周周一、周日（用于「六、下周关注点」） */
+  nextWeekStart?: string;
+  nextWeekEnd?: string;
   /** 日程页当前周历对应的周一、周日（可与自然周不同） */
   viewWeekStart?: string;
   viewWeekEnd?: string;
@@ -55,7 +58,7 @@ function systemPrompt(kind: WorkgraphKind): string {
     dayplan: `${common} 生成「今日计划」：只关注未完成任务中，开始日或截止日为「今天」的任务；按优先级（P0 优先）与 deadline 排序；若无则说明并给轻量建议。`,
     weekplan: `${common} 生成「本周计划」：自然周为「本周一～本周日」；按未完成任务中有 deadline 的日期分组列出；若某天无任务可省略该天。`,
     risk: `${common} 生成「项目管理风险分析」：从延期、阻塞、资源与高优先级缺口等角度分析；列出具体任务标题与缓解思路；勿编造数据中不存在的任务。`,
-    weekreport: `${common} 生成「本周工作报告」：结构参考——一、总体概况；二、项目进展（按项目）；三、完成工作；四、风险与延期；五、本周关键节点；六、下周关注点。数据须与下方 JSON 一致，勿编造任务。`,
+    weekreport: `${common} 你是周度汇报撰写助手。必须严格按用户消息中的「周度工作报告」版式输出，与 JSON 数据一致；不得编造任务标题。`,
     decompose: `${common} 生成「任务拆解」：为给定父任务标题输出 4～8 条可执行子任务（含序号），可含角色/优先级建议。`,
     schedule_daily: `${common} 生成「今日工作/日度计划」：基于未完成任务。依次覆盖：①已延期项（优先）；②今日焦点（开始或截止为今日）；③未来 7 日内截止；④无截止日期但进行中/阻塞/评审。最后给简短节奏建议。数据须与 JSON 一致。`,
     schedule_weekly: `${common} 生成「本周工作计划表」：按「视图周」周一至周日（见 meta.viewWeekStart～viewWeekEnd）列出每日有开始或截止落点的任务；若某日无落点可写「当日无开始/截止落点」。与周历视图一致。勿编造任务。`,
@@ -72,6 +75,8 @@ function buildUserContent(input: WorkgraphInsightInput): string {
       today: input.today,
       weekStart: input.weekStart,
       weekEnd: input.weekEnd,
+      nextWeekStart: input.nextWeekStart || "",
+      nextWeekEnd: input.nextWeekEnd || "",
       viewWeekStart: input.viewWeekStart || "",
       viewWeekEnd: input.viewWeekEnd || "",
       userName: input.userName || "",
@@ -89,6 +94,32 @@ function buildUserContent(input: WorkgraphInsightInput): string {
   };
   if (input.kind === "decompose") {
     return `待拆解父任务标题：${(input.title || "").trim()}\n\n上下文（JSON）：\n${JSON.stringify(compact)}`;
+  }
+  if (input.kind === "weekreport") {
+    const ws = input.weekStart;
+    const we = input.weekEnd;
+    const nw0 = input.nextWeekStart || "";
+    const nw1 = input.nextWeekEnd || "";
+    return (
+      `请输出一份「周度工作报告」纯文本（不要用 Markdown 代码围栏），可直接粘贴到邮件或 Word。\n\n` +
+      `【必须遵守的版式】\n` +
+      `第1行：【周度工作报告】（AI 生成）\n` +
+      `第2行：汇报周期：${ws}（周一）～ ${we}（周日）\n` +
+      `第3行：生成基准日：${input.today} · 账号：${input.userName || "—"}\n` +
+      `空一行\n` +
+      `一、总体概况\n` +
+      `- 活跃项目：仅统计 JSON.projects 中 archived=false 的项目数\n` +
+      `- 任务合计：全部任务按状态统计（已完成/进行中/阻塞/待办/评审）\n` +
+      `- 整体任务完成率：已完成/总数 的百分比估算\n` +
+      `二、项目进展（按项目）\n` +
+      `对每个未归档项目用「■ 项目名」起头；按 projectId 汇总该项目任务数、各状态数、项目内完成率；若有 P0/P1 且进行中可列「重点推进」；有阻塞则列阻塞任务标题（勿超过数据范围）\n` +
+      `三、完成工作（状态为「完成」的任务汇总）\n` +
+      `四、风险与延期（已延期 deadline、未完成 P0、阻塞任务条数与示例标题）\n` +
+      `五、本周关键节点：deadline 在 ${ws}～${we} 之间的未完成任务（日期+标题+优先级）\n` +
+      `六、下周关注点：deadline 在下一自然周 ${nw0}～${nw1} 的未完成任务（若无则写「（无或尚未排期）」）\n` +
+      `最后一行：— 以上为结构化摘要，可直接粘贴到邮件或文档中微调措辞 —\n\n` +
+      `数据 JSON：\n${JSON.stringify(compact)}`
+    );
   }
   const scopeNote =
     input.kind === "schedule_daily" || input.kind === "schedule_weekly" || input.kind === "schedule_todo"

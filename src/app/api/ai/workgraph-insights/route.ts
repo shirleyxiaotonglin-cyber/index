@@ -56,6 +56,8 @@ export async function POST(req: Request) {
     weekEnd: String(o.weekEnd || "").slice(0, 16),
     viewWeekStart: typeof o.viewWeekStart === "string" ? o.viewWeekStart.slice(0, 16) : undefined,
     viewWeekEnd: typeof o.viewWeekEnd === "string" ? o.viewWeekEnd.slice(0, 16) : undefined,
+    nextWeekStart: typeof o.nextWeekStart === "string" ? o.nextWeekStart.slice(0, 16) : undefined,
+    nextWeekEnd: typeof o.nextWeekEnd === "string" ? o.nextWeekEnd.slice(0, 16) : undefined,
     userName: typeof o.userName === "string" ? o.userName : undefined,
     projects: Array.isArray(o.projects) ? (o.projects as WorkgraphInsightInput["projects"]) : [],
     tasks: Array.isArray(o.tasks) ? (o.tasks as WorkgraphInsightInput["tasks"]) : [],

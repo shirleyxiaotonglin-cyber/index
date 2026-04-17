@@ -90,7 +90,7 @@ export function buildWeekReportFallback(project: Pick<Project, "name">, tasks: T
   const risk = buildRiskAnalysis(tasks);
   return {
     type: "weekreport" as const,
-    title: `${project.name} — 本周工作报告`,
+    title: `${project.name} — 周度工作报告`,
     overview: `共 ${n} 项任务，已完成 ${done} 项；未完成 ${n - done} 项。`,
     sections: [
       {

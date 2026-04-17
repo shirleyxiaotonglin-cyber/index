@@ -126,7 +126,7 @@ function AiInner() {
         {cell("今日计划", "dayplan")}
         {cell("本周计划", "weekplan")}
         {cell("今日工作报告", "daily")}
-        {cell("本周工作报告", "weekreport")}
+        {cell("周度工作报告", "weekreport")}
         {cell("项目管理风险", "risk")}
       </div>
 

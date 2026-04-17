@@ -17,7 +17,7 @@ var PROMPTS = {
   risk:
     "你是项目管理助手，输出使用中文。使用纯文本，不要用 Markdown 代码围栏。 生成「项目管理风险分析」：从延期、阻塞、资源与高优先级缺口等角度分析；列出具体任务标题与缓解思路；勿编造数据中不存在的任务。",
   weekreport:
-    "你是项目管理助手，输出使用中文。使用纯文本，不要用 Markdown 代码围栏。 生成「本周工作报告」：结构参考——一、总体概况；二、项目进展（按项目）；三、完成工作；四、风险与延期；五、本周关键节点；六、下周关注点。数据须与下方 JSON 一致，勿编造任务。",
+    "你是项目管理助手，输出使用中文，纯文本。你是周度汇报撰写助手。必须严格按用户消息中的「周度工作报告」版式输出，与 JSON 数据一致；不得编造任务标题。",
   decompose:
     "你是项目管理助手，输出使用中文。使用纯文本，不要用 Markdown 代码围栏。 生成「任务拆解」：为给定父任务标题输出 4～8 条可执行子任务（含序号），可含角色/优先级建议。",
   schedule_daily:
@@ -36,6 +36,8 @@ function buildUser(kind, body) {
       today: String(body.today || ""),
       weekStart: String(body.weekStart || ""),
       weekEnd: String(body.weekEnd || ""),
+      nextWeekStart: String(body.nextWeekStart || ""),
+      nextWeekEnd: String(body.nextWeekEnd || ""),
       viewWeekStart: String(body.viewWeekStart || ""),
       viewWeekEnd: String(body.viewWeekEnd || ""),
       userName: String(body.userName || ""),
@@ -55,6 +57,51 @@ function buildUser(kind, body) {
   };
   if (kind === "decompose") {
     return "待拆解父任务标题：" + String(body.title || "").trim() + "\n\n上下文（JSON）：\n" + JSON.stringify(compact);
+  }
+  if (kind === "weekreport") {
+    var ws = String(body.weekStart || "");
+    var we = String(body.weekEnd || "");
+    var nw0 = String(body.nextWeekStart || "");
+    var nw1 = String(body.nextWeekEnd || "");
+    var tu = String(body.today || "");
+    var un = String(body.userName || "");
+    return (
+      "请输出一份「周度工作报告」纯文本（不要用 Markdown 代码围栏），可直接粘贴到邮件或 Word。\n\n" +
+      "【必须遵守的版式】\n" +
+      "第1行：【周度工作报告】（AI 生成）\n" +
+      "第2行：汇报周期：" +
+      ws +
+      "（周一）～ " +
+      we +
+      "（周日）\n" +
+      "第3行：生成基准日：" +
+      tu +
+      " · 账号：" +
+      (un || "—") +
+      "\n" +
+      "空一行\n" +
+      "一、总体概况\n" +
+      "- 活跃项目：仅统计 JSON.projects 中 archived=false 的项目数\n" +
+      "- 任务合计：全部任务按状态统计（已完成/进行中/阻塞/待办/评审）\n" +
+      "- 整体任务完成率：已完成/总数 的百分比估算\n" +
+      "二、项目进展（按项目）\n" +
+      "对每个未归档项目用「■ 项目名」起头；按 projectId 汇总该项目任务数、各状态数、项目内完成率；若有 P0/P1 且进行中可列「重点推进」；有阻塞则列阻塞任务标题（勿超过数据范围）\n" +
+      "三、完成工作（状态为「完成」的任务汇总）\n" +
+      "四、风险与延期（已延期 deadline、未完成 P0、阻塞任务条数与示例标题）\n" +
+      "五、本周关键节点：deadline 在 " +
+      ws +
+      "～" +
+      we +
+      " 之间的未完成任务（日期+标题+优先级）\n" +
+      "六、下周关注点：deadline 在下一自然周 " +
+      nw0 +
+      "～" +
+      nw1 +
+      " 的未完成任务（若无则写「（无或尚未排期）」）\n" +
+      "最后一行：— 以上为结构化摘要，可直接粘贴到邮件或文档中微调措辞 —\n\n" +
+      "数据 JSON：\n" +
+      JSON.stringify(compact)
+    );
   }
   var scope =
     kind === "schedule_daily" || kind === "schedule_weekly" || kind === "schedule_todo"
