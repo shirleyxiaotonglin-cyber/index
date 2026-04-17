@@ -4741,7 +4741,7 @@
       '<button type="button" class="' + navClass("dashboard") + '" data-nav="dashboard" title="项目概览与我的任务">工作台</button>' +
 '<button type="button" class="' + navClass("projects") + '" data-nav="projects" title="新建 / 打开项目，管理流程与任务">项目</button>' +
         '<button type="button" class="' + navClass("schedule") + '" data-nav="schedule" title="周历与截止 DDL、日程助手">日程</button>' +
-        '<button type="button" class="' + navClass("ai") + '" data-nav="ai" title="日报、周报、计划与纪要导入（本地规则）">AI 中心</button>' +
+        '<button type="button" class="' + navClass("ai") + '" data-nav="ai" title="优先 OpenRouter，失败则用本地规则">AI 中心</button>' +
       '<div style="flex:1"></div>' +
       '<button type="button" class="' + navClass("profile") + '" data-nav="profile" title="个人资料与头像设置">个人中心</button>' +
       '<input type="file" id="side-avatar-file" accept="image/*" class="hidden" />' +
@@ -5024,7 +5024,11 @@
           '<span class="' + badgeClass(t.status) + '">' + esc(t.status) + "</span> " +
           '<span class="' + prioClass(t.priority) + '">' + esc(t.priority) + "</span><br/>" +
           esc(t.title) +
-          '<div class="muted" style="font-size:11px;margin-top:4px">' + esc(t.assignee || "未指派") + "</div></button>";
+          '<div class="muted" style="font-size:11px;margin-top:4px">' + esc(t.assignee || "未指派") + "</div>" +
+          '<div style="display:flex;gap:6px;margin-top:6px;justify-content:flex-end">' +
+          '<span class="btn btn-sm" data-task-ins="' + esc(t.id) + '" title="新建同级任务" style="display:inline-block">并列</span>' +
+          '<span class="btn btn-sm" data-task-child="' + esc(t.id) + '" title="新建子任务" style="display:inline-block">子任务</span>' +
+          "</div></button>";
       }
       cols +=
         '<div class="kcol" data-drop-status="' + esc(st) + '"><h4>' + esc(STATUS_LABEL[st]) + " (" + items.length + ")</h4>" + inner + "</div>";
@@ -5050,7 +5054,11 @@
         "<td><input type=\"number\" class=\"input\" style=\"width:72px\" data-field=\"actualHours\" data-id=\"" + esc(t.id) + "\" value=\"" + (t.actualHours != null ? t.actualHours : "") + "\" /></td>" +
         '<td><button type="button" class="btn btn-sm" data-open="' +
         esc(t.id) +
-        '">详情</button> <button type="button" class="btn btn-sm" data-task-edit="' +
+        '">详情</button> <button type="button" class="btn btn-sm" data-task-ins="' +
+        esc(t.id) +
+        '">并列</button> <button type="button" class="btn btn-sm" data-task-child="' +
+        esc(t.id) +
+        '">子任务</button> <button type="button" class="btn btn-sm" data-task-edit="' +
         esc(t.id) +
         '">编辑</button> <button type="button" class="btn btn-sm" data-task-del="' +
         esc(t.id) +
@@ -5076,7 +5084,9 @@
     }
     return (
       '<div class="tree-row" style="--depth:' + depth + '"><button type="button" class="btn btn-sm" data-open="' + esc(t.id) + '">' + esc(t.title) + "</button> " +
-      '<span class="' + badgeClass(t.status) + '">' + esc(t.status) + "</span></div>" +
+      '<span class="' + badgeClass(t.status) + '">' + esc(t.status) + "</span> " +
+      '<button type="button" class="btn btn-sm" data-task-ins="' + esc(t.id) + '">并列</button> ' +
+      '<button type="button" class="btn btn-sm" data-task-child="' + esc(t.id) + '">子任务</button></div>' +
       sub
     );
   }
@@ -5849,7 +5859,7 @@
   function renderAi() {
     return (
       '<div class="ai-page">' +
-      '<div class="page-header"><h2>AI 中心（本地规则模拟）</h2><p class="page-subtitle">快速生成日报、计划、风险摘要与周报。</p></div>' +
+      '<div class="page-header"><h2>AI 中心</h2><p class="page-subtitle">优先调用 OpenRouter 生成；不可用或失败时自动使用本地智能规则。会议纪要导入走「AI 结构化」接口。</p></div>' +
       '<div class="ai-hero"><p>根据当前账号下的任务与项目，一键生成日/周计划与总结（不联网）。若列表为空，请先到「项目」里新建任务或点侧栏「恢复示例」。</p>' +
       "</div>" +
       '<div class="ai-grid">' +
@@ -6429,15 +6439,78 @@
     }
   }
 
+  function workgraphInsightPayload(kind, titleOpt) {
+    var mon = mondayOfThisWeekNatural();
+    var sun = new Date(mon);
+    sun.setDate(mon.getDate() + 6);
+    var payload = {
+      kind: kind,
+      today: ymdFromDate(new Date()),
+      weekStart: ymdFromDate(mon),
+      weekEnd: ymdFromDate(sun),
+      userName: state.userName || "",
+      projects: state.projects.map(function (p) {
+        return { id: p.id, name: p.name, archived: !!p.archived };
+      }),
+      tasks: state.tasks.map(function (t) {
+        return {
+          id: t.id,
+          title: t.title,
+          status: t.status,
+          priority: t.priority || "",
+          deadline: t.deadline || "",
+          startTime: t.startTime || "",
+          projectId: t.projectId || "",
+          description: String(t.description || "").slice(0, 500)
+        };
+      })
+    };
+    if (titleOpt && String(titleOpt).trim()) payload.title = String(titleOpt).trim();
+    return payload;
+  }
+
+  function tryWorkgraphAi(kind, titleOpt, onDone) {
+    meetingAiFetch("/api/ai/workgraph-insights", {
+      method: "POST",
+      body: workgraphInsightPayload(kind, titleOpt)
+    })
+      .then(function (r) {
+        return r.json().then(function (j) {
+          return { r: r, j: j };
+        });
+      })
+      .then(function (o) {
+        if (o.r.ok && o.j && o.j.ok && typeof o.j.text === "string" && o.j.text.trim()) {
+          onDone(true, o.j.text);
+        } else {
+          onDone(false, null);
+        }
+      })
+      .catch(function () {
+        onDone(false, null);
+      });
+  }
+
   function bindAi() {
-    var daily = function () {
+    var dailyLocal = function () {
       var ts = state.tasks;
       var done = ts.filter(function (t) { return t.status === "done"; }).length;
       var bl = ts.filter(function (t) { return t.status === "blocked"; }).length;
       var el = document.getElementById("ai-daily");
       if (el) el.textContent = "任务 " + ts.length + " 条，完成 " + done + "，阻塞 " + bl + "。建议优先处理阻塞项。";
     };
-    var dayplan = function () {
+    var daily = function () {
+      var el = document.getElementById("ai-daily");
+      if (el) el.textContent = "正在生成…";
+      tryWorkgraphAi("daily", null, function (ok, text) {
+        if (ok && text) {
+          if (el) el.textContent = text;
+          return;
+        }
+        dailyLocal();
+      });
+    };
+    var dayplanLocal = function () {
       var today = ymdFromDate(new Date());
       var cand = state.tasks.filter(function (t) {
         if (t.status === "done") return false;
@@ -6471,7 +6544,18 @@
       lines.push("建议：优先 P0/P1 且「截止今日」；大块任务拆成可验收步骤。");
       el.textContent = lines.join("\n");
     };
-    var weekplan = function () {
+    var dayplan = function () {
+      var el = document.getElementById("ai-day-plan");
+      if (el) el.textContent = "正在生成…";
+      tryWorkgraphAi("dayplan", null, function (ok, text) {
+        if (ok && text) {
+          if (el) el.textContent = text;
+          return;
+        }
+        dayplanLocal();
+      });
+    };
+    var weekplanLocal = function () {
       var mon = mondayOfThisWeekNatural();
       var dayNames = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
       var lines = ["【本周计划】（自然周 · 仅统计未完成任务有 deadline 的日期）"];
@@ -6500,16 +6584,49 @@
       var el = document.getElementById("ai-week-plan");
       if (el) el.textContent = lines.join("\n");
     };
-    var risk = function () {
+    var weekplan = function () {
+      var el = document.getElementById("ai-week-plan");
+      if (el) el.textContent = "正在生成…";
+      tryWorkgraphAi("weekplan", null, function (ok, text) {
+        if (ok && text) {
+          if (el) el.textContent = text;
+          return;
+        }
+        weekplanLocal();
+      });
+    };
+    var riskLocal = function () {
       var el = document.getElementById("ai-risk");
       var overdue = state.tasks.filter(function (t) {
         return t.deadline && t.status !== "done" && new Date(t.deadline) < new Date();
       }).length;
       if (el) el.textContent = "延期任务约 " + overdue + " 条；请关注 P0 且未完成任务。";
     };
-    var weekreport = function () {
+    var risk = function () {
+      var el = document.getElementById("ai-risk");
+      if (el) el.textContent = "正在生成…";
+      tryWorkgraphAi("risk", null, function (ok, text) {
+        if (ok && text) {
+          if (el) el.textContent = text;
+          return;
+        }
+        riskLocal();
+      });
+    };
+    var weekreportLocal = function () {
       var el = document.getElementById("ai-week-report");
       if (el) el.textContent = buildWeeklyWorkReportText();
+    };
+    var weekreport = function () {
+      var el = document.getElementById("ai-week-report");
+      if (el) el.textContent = "正在生成…";
+      tryWorkgraphAi("weekreport", null, function (ok, text) {
+        if (ok && text) {
+          if (el) el.textContent = text;
+          return;
+        }
+        weekreportLocal();
+      });
     };
     var btns = appEl.querySelectorAll("[data-ai]");
     for (var i = 0; i < btns.length; i++) {
@@ -6527,12 +6644,19 @@
             if (pre) pre.textContent = "请先输入标题";
             return;
           }
-          if (pre) {
-            pre.textContent =
-              "建议子任务：\n1) " +
-              title +
-              " — 需求澄清\n2) 方案与排期\n3) 开发 / 联调\n4) 验收与上线\n（本地模拟，非真实大模型）";
-          }
+          if (pre) pre.textContent = "正在生成…";
+          tryWorkgraphAi("decompose", title, function (ok, text) {
+            if (ok && text) {
+              if (pre) pre.textContent = text;
+              return;
+            }
+            if (pre) {
+              pre.textContent =
+                "建议子任务：\n1) " +
+                title +
+                " — 需求澄清\n2) 方案与排期\n3) 开发 / 联调\n4) 验收与上线\n（本地智能规则，OpenRouter 不可用时）";
+            }
+          });
         }
       };
     }
@@ -6649,6 +6773,24 @@
         deleteTaskCascade(t);
         save(state);
         render();
+      };
+    }
+    var ins = appEl.querySelectorAll("[data-task-ins]");
+    for (var ii = 0; ii < ins.length; ii++) {
+      ins[ii].onclick = function (e) {
+        e.stopPropagation();
+        var id = this.getAttribute("data-task-ins");
+        var t = state.tasks.find(function (x) { return x.id === id; });
+        if (t) openTaskInsertSibling(t);
+      };
+    }
+    var childs = appEl.querySelectorAll("[data-task-child]");
+    for (var ic = 0; ic < childs.length; ic++) {
+      childs[ic].onclick = function (e) {
+        e.stopPropagation();
+        var id = this.getAttribute("data-task-child");
+        var t = state.tasks.find(function (x) { return x.id === id; });
+        if (t) openTaskInsertChild(t);
       };
     }
     var rows = appEl.querySelectorAll("[data-task-row]");
