@@ -57,11 +57,13 @@ module.exports = async function handler(req, res) {
   }
   const base = "https://openrouter.ai/api/v1";
   var DEFAULT_MR_MODEL = "meta-llama/llama-3.3-70b-instruct:free";
+  var FALLBACKS = ["openrouter/free", "meta-llama/llama-3.2-3b-instruct:free"];
+  var RATE_MS = 2800;
   var rawModel = String(
     process.env.OPENROUTER_MEETING_MODEL || process.env.OPENROUTER_MODEL || ""
   ).trim();
   if (rawModel === "meta-llama/llama-3.1-8b-instruct:free") rawModel = "";
-  var model =
+  var primary =
     !rawModel ||
     rawModel === "api/v1" ||
     rawModel === "v1" ||
@@ -69,6 +71,17 @@ module.exports = async function handler(req, res) {
     rawModel.indexOf("https://") === 0
       ? DEFAULT_MR_MODEL
       : rawModel;
+  var models = [];
+  var seen = {};
+  function pushModel(m) {
+    if (!seen[m]) {
+      seen[m] = true;
+      models.push(m);
+    }
+  }
+  pushModel(primary);
+  for (var fi = 0; fi < FALLBACKS.length; fi++) pushModel(FALLBACKS[fi]);
+
   var hdr = {
     Authorization: "Bearer " + String(key).trim(),
     "Content-Type": "application/json",
@@ -77,38 +90,98 @@ module.exports = async function handler(req, res) {
   if (ref) hdr["HTTP-Referer"] = ref.indexOf("http") === 0 ? ref : "https://" + ref;
   var xt = String(process.env.OPENROUTER_APP_TITLE || "").trim();
   if (xt) hdr["X-Title"] = xt.slice(0, 120);
-  const r = await fetch(base + "/chat/completions", {
-    method: "POST",
-    headers: hdr,
-    body: JSON.stringify({
-      model,
-      temperature: 0.2,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: SYSTEM },
-        { role: "user", content: "请从以下正文提取任务与项目信息：\n\n" + text.slice(0, 120000) },
-      ],
-    }),
+
+  function sleep(ms) {
+    return new Promise(function (r) {
+      setTimeout(r, ms);
+    });
+  }
+  function parseChatJson(raw) {
+    var data;
+    try {
+      data = JSON.parse(raw);
+    } catch (e) {
+      return { kind: "err", detail: raw.slice(0, 400) };
+    }
+    var err = data.error;
+    var hasC = data.choices && data.choices.length;
+    if (err && !hasC) {
+      var em = (err.message || "") + JSON.stringify(err);
+      if (
+        err.code === 429 ||
+        /rate-?limit|temporarily rate-limited|429/i.test(em) ||
+        /rate-?limit|temporarily rate-limited/i.test(raw)
+      ) {
+        return { kind: "rl" };
+      }
+      return { kind: "err", detail: raw.slice(0, 400) };
+    }
+    var c0 = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+    if (typeof c0 === "string" && c0.trim()) return { kind: "ok", content: c0 };
+    return { kind: "err", detail: raw.slice(0, 400) };
+  }
+  function httpRl(status, raw) {
+    if (status === 429) return true;
+    return /"code"\s*:\s*429|rate-?limit|temporarily rate-limited/i.test(raw);
+  }
+
+  var messages = [
+    { role: "system", content: SYSTEM },
+    { role: "user", content: "请从以下正文提取任务与项目信息：\n\n" + text.slice(0, 120000) },
+  ];
+
+  var lastDetail = "";
+  var mi, attempt;
+  for (mi = 0; mi < models.length; mi++) {
+    for (attempt = 0; attempt < 2; attempt++) {
+      var r = await fetch(base + "/chat/completions", {
+        method: "POST",
+        headers: hdr,
+        body: JSON.stringify({
+          model: models[mi],
+          temperature: 0.2,
+          response_format: { type: "json_object" },
+          messages: messages,
+        }),
+      });
+      var raw = await r.text();
+      if (r.status === 401) {
+        return res.status(502).json({ ok: false, error: "OpenRouter 请求失败", detail: raw.slice(0, 400) });
+      }
+      if (!r.ok) {
+        lastDetail = raw.slice(0, 400);
+        if (httpRl(r.status, raw) && attempt === 0) {
+          await sleep(RATE_MS);
+          continue;
+        }
+        break;
+      }
+      var pr = parseChatJson(raw);
+      if (pr.kind === "ok") {
+        var parsed;
+        try {
+          parsed = JSON.parse(pr.content);
+        } catch (e2) {
+          return res.status(502).json({ ok: false, error: "模型输出不是合法 JSON", detail: pr.content.slice(0, 240) });
+        }
+        return res.status(200).json({ ok: true, parsed: parsed });
+      }
+      if (pr.kind === "rl") {
+        lastDetail = raw.slice(0, 400);
+        if (attempt === 0) {
+          await sleep(RATE_MS);
+          continue;
+        }
+        break;
+      }
+      lastDetail = pr.detail || raw.slice(0, 400);
+      break;
+    }
+  }
+  return res.status(502).json({
+    ok: false,
+    error:
+      "OpenRouter 请求失败（免费模型可能短时限流，请稍后重试；或在 OpenRouter 绑定自有提供商密钥以提升额度）",
+    detail: (lastDetail || "").slice(0, 400),
   });
-  const raw = await r.text();
-  if (!r.ok) {
-    return res.status(502).json({ ok: false, error: "OpenRouter 请求失败", detail: raw.slice(0, 400) });
-  }
-  let data;
-  try {
-    data = JSON.parse(raw);
-  } catch {
-    return res.status(502).json({ ok: false, error: "接口返回非 JSON", detail: raw.slice(0, 200) });
-  }
-  const content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
-  if (!content || typeof content !== "string") {
-    return res.status(502).json({ ok: false, error: "模型未返回内容", detail: raw.slice(0, 200) });
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(content);
-  } catch {
-    return res.status(502).json({ ok: false, error: "模型输出不是合法 JSON", detail: content.slice(0, 240) });
-  }
-  return res.status(200).json({ ok: true, parsed: parsed });
 };
