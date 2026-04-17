@@ -56,7 +56,7 @@ module.exports = async function handler(req, res) {
     });
   }
   const base = "https://openrouter.ai/api/v1";
-  var DEFAULT_MR_MODEL = "openrouter/free";
+  var DEFAULT_MR_MODEL = "google/gemma-4-26b-a4b-it:free";
   var FALLBACKS = ["meta-llama/llama-3.2-3b-instruct:free"];
   var MAX_ROUNDS = 3;
   var BACKOFF = [900, 1800, 3200];
