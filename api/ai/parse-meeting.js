@@ -58,7 +58,8 @@ module.exports = async function handler(req, res) {
   const base = "https://openrouter.ai/api/v1";
   var DEFAULT_MR_MODEL = "openrouter/free";
   var FALLBACKS = ["meta-llama/llama-3.2-3b-instruct:free"];
-  var RATE_MS = 2800;
+  var MAX_ROUNDS = 3;
+  var BACKOFF = [900, 1800, 3200];
   var rawModel = String(process.env.OPENROUTER_MEETING_MODEL || "").trim();
   if (rawModel === "meta-llama/llama-3.1-8b-instruct:free") rawModel = "";
   var primary =
@@ -97,6 +98,10 @@ module.exports = async function handler(req, res) {
       setTimeout(r, ms);
     });
   }
+  function backoffMs(round) {
+    var idx = Math.min(round, BACKOFF.length - 1);
+    return BACKOFF[idx];
+  }
   function parseChatJson(raw) {
     var data;
     try {
@@ -131,9 +136,11 @@ module.exports = async function handler(req, res) {
   ];
 
   var lastDetail = "";
-  var mi, attempt;
-  for (mi = 0; mi < models.length; mi++) {
-    for (attempt = 0; attempt < 2; attempt++) {
+  var sawRateLimit = false;
+  var mi, round;
+  for (round = 0; round < MAX_ROUNDS; round++) {
+    var roundHitRateLimit = false;
+    for (mi = 0; mi < models.length; mi++) {
       var r = await fetch(base + "/chat/completions", {
         method: "POST",
         headers: hdr,
@@ -150,11 +157,11 @@ module.exports = async function handler(req, res) {
       }
       if (!r.ok) {
         lastDetail = raw.slice(0, 400);
-        if (httpRl(r.status, raw) && attempt === 0) {
-          await sleep(RATE_MS);
+        if (httpRl(r.status, raw)) {
+          roundHitRateLimit = true;
           continue;
         }
-        break;
+        continue;
       }
       var pr = parseChatJson(raw);
       if (pr.kind === "ok") {
@@ -168,20 +175,21 @@ module.exports = async function handler(req, res) {
       }
       if (pr.kind === "rl") {
         lastDetail = raw.slice(0, 400);
-        if (attempt === 0) {
-          await sleep(RATE_MS);
-          continue;
-        }
-        break;
+        roundHitRateLimit = true;
+        continue;
       }
       lastDetail = pr.detail || raw.slice(0, 400);
-      break;
+      continue;
     }
+    if (!roundHitRateLimit) break;
+    sawRateLimit = true;
+    await sleep(backoffMs(round));
   }
   return res.status(502).json({
     ok: false,
-    error:
-      "OpenRouter 请求失败（免费模型可能短时限流，请稍后重试；或在 OpenRouter 绑定自有提供商密钥以提升额度）",
+    error: sawRateLimit
+      ? "OpenRouter 请求失败（免费模型短时限流，已自动轮询多模型并重试；请稍后再试，或在 OpenRouter 绑定自有提供商密钥提升额度）"
+      : "OpenRouter 请求失败",
     detail: (lastDetail || "").slice(0, 400),
   });
 };

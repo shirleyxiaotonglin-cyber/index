@@ -37,7 +37,8 @@ const DEFAULT_MEETING_MODEL = "openrouter/free";
  */
 const MEETING_FALLBACK_MODELS = ["meta-llama/llama-3.2-3b-instruct:free"] as const;
 
-const RATE_LIMIT_RETRY_MS = 2800;
+const MAX_RATE_LIMIT_ROUNDS = 3;
+const RATE_LIMIT_BACKOFF_MS = [900, 1800, 3200] as const;
 
 /** OpenRouter 已下线、仍可能留在 .env / Vercel 里的 :free 模型 ID，自动改用默认 */
 const RETIRED_OPENROUTER_FREE_MODELS = new Set(["meta-llama/llama-3.1-8b-instruct:free"]);
@@ -101,6 +102,10 @@ function openRouterRequestHeaders(apiKey: string): Record<string, string> {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+function backoffMs(round: number): number {
+  return RATE_LIMIT_BACKOFF_MS[Math.min(round, RATE_LIMIT_BACKOFF_MS.length - 1)];
 }
 
 type ChatJson =
@@ -174,8 +179,10 @@ export async function parseMeetingWithAi(text: string): Promise<MeetingParseResu
     },
   ];
 
-  for (const model of models) {
-    for (let attempt = 0; attempt < 2; attempt++) {
+  let sawRateLimit = false;
+  for (let round = 0; round < MAX_RATE_LIMIT_ROUNDS; round++) {
+    let roundHitRateLimit = false;
+    for (const model of models) {
       const body = {
         model,
         temperature: 0.2,
@@ -197,12 +204,11 @@ export async function parseMeetingWithAi(text: string): Promise<MeetingParseResu
 
       if (!res.ok) {
         lastDetail = raw.slice(0, 400);
-        if (isHttpRateLimited(res.status, raw) && attempt === 0) {
-          await sleep(RATE_LIMIT_RETRY_MS);
+        if (isHttpRateLimited(res.status, raw)) {
+          roundHitRateLimit = true;
           continue;
         }
-        if (isHttpRateLimited(res.status, raw)) break;
-        break;
+        continue;
       }
 
       const parsed = parseChatCompletionJson(raw);
@@ -218,21 +224,23 @@ export async function parseMeetingWithAi(text: string): Promise<MeetingParseResu
 
       if (parsed.kind === "rate_limited") {
         lastDetail = raw.slice(0, 400);
-        if (attempt === 0) {
-          await sleep(RATE_LIMIT_RETRY_MS);
-          continue;
-        }
-        break;
+        roundHitRateLimit = true;
+        continue;
       }
 
       lastDetail = parsed.detail;
-      break;
+      continue;
     }
+    if (!roundHitRateLimit) break;
+    sawRateLimit = true;
+    await sleep(backoffMs(round));
   }
 
   return {
     ok: false,
-    error: "OpenRouter 请求失败（免费模型可能短时限流，请稍后重试；或在 OpenRouter 绑定自有提供商密钥以提升额度）",
+    error: sawRateLimit
+      ? "OpenRouter 请求失败（免费模型短时限流，已自动轮询多模型并重试；请稍后再试，或在 OpenRouter 绑定自有提供商密钥提升额度）"
+      : "OpenRouter 请求失败",
     detail: lastDetail.slice(0, 400),
   };
 }
