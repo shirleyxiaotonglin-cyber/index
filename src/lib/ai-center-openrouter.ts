@@ -66,7 +66,7 @@ function systemFor(kind: Kind): string {
     weekly: `${shared} 结构：{"type":"weekly","goals":string[],"milestones":string[],"risks":string[],"summary":string}`,
     dayplan: `${shared} 生成「今日计划」：未完成且开始日或截止日为「今日」的任务。结构：{"type":"dayplan","today":string,"items":[{"title":string,"priority":string,"mark":string}],"suggestions":string[]}`,
     weekplan: `${shared} 生成「本周计划」：自然周周一至周日，按 deadline 将未完成任务归到各日。结构：{"type":"weekplan","weekStart":string,"byDay":[{"date":string,"label":string,"tasks":string[]}],"summary":string}`,
-    weekreport: `${shared} 生成「本周工作报告」：含概况、进展、风险、本周节点、下周关注。结构：{"type":"weekreport","title":string,"overview":string,"sections":[{"heading":string,"bullets":string[]}],"risks":string[],"nextFocus":string[]}`,
+    weekreport: `${shared} 生成「周度工作报告」JSON，与静态页周度汇报一致：含总体概况、按项目进展、完成工作、风险与延期、本周关键节点、下周关注点；勿编造任务。结构：{"type":"weekreport","title":string,"overview":string,"sections":[{"heading":string,"bullets":string[]}],"risks":string[],"nextFocus":string[]}`,
     project: `${shared} 结构：{"type":"project","title":string,"completion":number,"highlights":string[],"risks":string[],"next":string[]}`,
     project_deep: `${shared} 结构：{"type":"project_deep","bottlenecks":string[],"efficiencyIssues":string[],"dependencies":string[],"actions":string[]}`,
     risk: `${shared} 生成「项目管理风险分析」。结构：{"type":"risk","topRisks":[{"risk":string,"impact":"high|medium|low","owner":string,"mitigation":string}]}`,
