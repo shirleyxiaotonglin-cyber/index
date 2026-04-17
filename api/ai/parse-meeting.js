@@ -57,11 +57,9 @@ module.exports = async function handler(req, res) {
   }
   const base = "https://openrouter.ai/api/v1";
   var DEFAULT_MR_MODEL = "openrouter/free";
-  var FALLBACKS = ["meta-llama/llama-3.2-3b-instruct:free", "meta-llama/llama-3.3-70b-instruct:free"];
+  var FALLBACKS = ["meta-llama/llama-3.2-3b-instruct:free"];
   var RATE_MS = 2800;
-  var rawModel = String(
-    process.env.OPENROUTER_MEETING_MODEL || process.env.OPENROUTER_MODEL || ""
-  ).trim();
+  var rawModel = String(process.env.OPENROUTER_MEETING_MODEL || "").trim();
   if (rawModel === "meta-llama/llama-3.1-8b-instruct:free") rawModel = "";
   var primary =
     !rawModel ||
