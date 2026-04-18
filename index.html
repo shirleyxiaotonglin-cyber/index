@@ -725,10 +725,29 @@
     return false;
   }
 
+  /**
+   * 若 workgraph_ai_api_base / WORKGRAPH_AI_PARSE_ORIGIN 误写成 …/api/ai 或 …/workgraph-insights，
+   * 再拼 /api/ai/parse-meeting 会请求到错误地址；若误命中 workgraph-insights 且 body 只有 { text }，服务端会返回「kind 无效」。
+   */
+  function normalizeMeetingAiApiBase(raw) {
+    if (!raw || typeof raw !== "string") return raw;
+    var b = String(raw).trim().replace(/\/+$/, "");
+    if (!b) return "";
+    var suffixes = [
+      /\/api\/ai\/workgraph-insights$/i,
+      /\/api\/ai\/parse-meeting$/i,
+      /\/api\/ai$/i,
+    ];
+    for (var si = 0; si < suffixes.length; si++) {
+      b = b.replace(suffixes[si], "");
+    }
+    return b.replace(/\/+$/, "");
+  }
+
   /** 仅用于 /api/ai/parse-meeting；跨域时 credentials 用 omit，避免 CORS 与 cookie 冲突 */
   function meetingAiFetch(path, opts) {
     opts = opts || {};
-    var base = meetingAiApiBase();
+    var base = normalizeMeetingAiApiBase(meetingAiApiBase());
     var url = (base ? base : "") + path;
     var cross = false;
     try {
@@ -4871,6 +4890,10 @@
             if (res.data && res.data.detail) msg += "：" + res.data.detail;
             if (!res.ok && res.status === 401) msg = "未登录或会话失效，请重新登录后再试 AI 解析。";
             if (!res.ok && res.status === 503) msg = (res.data && res.data.error) || msg;
+            if (/kind\s*无效/.test(msg)) {
+              msg +=
+                " — 多为 API 根地址写成了完整路径：请将 localStorage.workgraph_ai_api_base（或 WORKGRAPH_AI_PARSE_ORIGIN）设为站点根，例如 https://你的域名 ，不要带 /api/ai 或 /workgraph-insights；保存后刷新再试。";
+            }
             var elapsed = Date.now() - startedAt;
             if (isMeetingAiRateLimitedMessage(msg) && elapsed < MEETING_AI_CLIENT_MAX_WAIT_MS) {
               var waitMs = Math.min(MEETING_AI_CLIENT_RETRY_STEP_MS, MEETING_AI_CLIENT_MAX_WAIT_MS - elapsed);
