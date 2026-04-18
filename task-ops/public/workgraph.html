@@ -1332,6 +1332,19 @@
       render();
     }
     state = await loadStateFromSupabase(user.id);
+    var cachedAfterLoad = readSbStateCache(user.id);
+    if (state && cachedAfterLoad && cachedAfterLoad.siteChat) {
+      state.siteChat = {
+        global: Array.isArray(cachedAfterLoad.siteChat.global) ? cachedAfterLoad.siteChat.global.slice() : [],
+        threads:
+          cachedAfterLoad.siteChat.threads && typeof cachedAfterLoad.siteChat.threads === "object"
+            ? JSON.parse(JSON.stringify(cachedAfterLoad.siteChat.threads))
+            : {},
+      };
+      if (cachedAfterLoad.chatUi && typeof cachedAfterLoad.chatUi === "object") {
+        state.chatUi = JSON.parse(JSON.stringify(cachedAfterLoad.chatUi));
+      }
+    }
     if (
       state &&
       (!state.projects || !state.projects.length) &&
@@ -2391,6 +2404,34 @@
     }
   }
 
+  /** 导入/改状态等关键操作后立即写库，避免刷新早于防抖导致数据丢失（尤其 Supabase） */
+  async function persistStateImmediateAsync() {
+    if (!state || !activeAccount) return;
+    if (useSupabaseMode()) {
+      if (__sbSaveTimer) {
+        clearTimeout(__sbSaveTimer);
+        __sbSaveTimer = null;
+      }
+      await flushSaveToSupabase();
+      return;
+    }
+    try {
+      var json = JSON.stringify(state);
+      __lastSavedStateJson = json;
+      localStorage.setItem(storageKeyForUser(activeAccount), json);
+    } catch (e1) {}
+    if (useServerStorage()) {
+      if (__serverSaveTimer) {
+        clearTimeout(__serverSaveTimer);
+        __serverSaveTimer = null;
+      }
+      flushSaveToServer();
+    }
+    if (!useServerStorage() && !__syncingCrossAccountShares) {
+      syncCrossAccountProjectShares();
+    }
+  }
+
   function cloneProjectBundleFromState(srcState, projectId) {
     var proj = srcState.projects.find(function (p) {
       return p.id === projectId;
@@ -2846,17 +2887,20 @@
     var roots = state.tasks.filter(function (t) {
       return t.projectId === projId && !t.parentId;
     });
-    roots.sort(function (a, b) {
-      var ao = a.chainOrder != null ? a.chainOrder : 0;
-      var bo = b.chainOrder != null ? b.chainOrder : 0;
-      return ao - bo;
-    });
+    roots.sort(sortTasksByDeadlineFlow);
+    var seen = {};
+    var next = 0;
     for (var ri = 0; ri < roots.length; ri++) {
-      roots[ri].chainOrder = ri;
+      var co = roots[ri].chainOrder != null ? roots[ri].chainOrder : 0;
+      if (seen[co] === undefined) seen[co] = next++;
+    }
+    for (var rj = 0; rj < roots.length; rj++) {
+      var co2 = roots[rj].chainOrder != null ? roots[rj].chainOrder : 0;
+      roots[rj].chainOrder = seen[co2];
     }
   }
 
-  /** 串联主链：在指定根任务之后插入新的根任务（重排 chainOrder 并打开编辑） */
+  /** 串联主链：在指定「顺序」之后插入新的一环（整环后移，不破坏同环并列） */
   function insertChainRootAfter(projectId, afterTaskId) {
     var proj = state.projects.find(function (p) {
       return p.id === projectId;
@@ -2865,20 +2909,15 @@
     var roots = state.tasks.filter(function (t) {
       return t.projectId === projectId && !t.parentId;
     });
-    roots.sort(function (a, b) {
-      var ao = a.chainOrder != null ? a.chainOrder : 999999;
-      var bo = b.chainOrder != null ? b.chainOrder : 999999;
-      if (ao !== bo) return ao - bo;
-      return String(a.id).localeCompare(String(b.id));
-    });
-    var insertIndex = roots.length;
-    if (afterTaskId) {
-      for (var i = 0; i < roots.length; i++) {
-        if (roots[i].id === afterTaskId) {
-          insertIndex = i + 1;
-          break;
-        }
-      }
+    var afterTask = afterTaskId
+      ? roots.find(function (x) {
+          return x.id === afterTaskId;
+        })
+      : null;
+    var baseCo = afterTask && afterTask.chainOrder != null ? afterTask.chainOrder : -1;
+    for (var i = 0; i < roots.length; i++) {
+      var co = roots[i].chainOrder != null ? roots[i].chainOrder : 0;
+      if (co > baseCo) roots[i].chainOrder = co + 1;
     }
     var nt = {
       id: uid(),
@@ -2892,7 +2931,7 @@
       createdBy: state.userName,
       parentId: null,
       pipelineStage: 0,
-      chainOrder: insertIndex,
+      chainOrder: baseCo + 1,
       startTime: "",
       deadline: "",
       estimatedHours: "",
@@ -2900,7 +2939,6 @@
       tags: "",
     };
     state.tasks.push(nt);
-    renumberChainAfterDelete(projectId);
     save(state);
     render();
     openTaskEditor(nt, projectId);
@@ -2994,7 +3032,9 @@
     if (!proj) return;
     if (isChainProject(proj)) {
       if (!t.parentId) {
-        insertChainRootAfter(t.projectId, t.id);
+        if (!t.parallelGroup) t.parallelGroup = t.id;
+        save(state);
+        openTaskEditor(null, t.projectId, null, { chainParallelWithRoot: t.id });
         return;
       }
       openTaskEditor(null, t.projectId, t.parentId);
@@ -3044,9 +3084,6 @@
 
   function renderFlowNodeActionsHtml(proj, t) {
     var insLabel = "插入并列";
-    if (proj && isChainProject(proj)) {
-      insLabel = !t.parentId ? "下方插入" : "插入并列";
-    }
     return (
       '<div class="flow-node-actions">' +
       '<button type="button" class="flow-node-act" data-flow-act="ins" data-task-id="' +
@@ -3577,27 +3614,60 @@
       return '<p class="muted">暂无任务，请用「新建任务」从顶部按钮添加。</p>';
     }
     var chainCtx = buildChainContext(proj, ts);
+    var stepMap = {};
+    var stepOrder = [];
+    for (var si = 0; si < roots.length; si++) {
+      var rt = roots[si];
+      var sco = rt.chainOrder != null ? rt.chainOrder : 0;
+      if (!stepMap[sco]) {
+        stepMap[sco] = [];
+        stepOrder.push(sco);
+      }
+      stepMap[sco].push(rt);
+    }
+    stepOrder.sort(function (a, b) {
+      return a - b;
+    });
     var html = '<div class="pipeline-wrapper pipeline-vertical chain-linear">';
-    for (var i = 0; i < roots.length; i++) {
+    for (var stepIdx = 0; stepIdx < stepOrder.length; stepIdx++) {
+      var coKey = stepOrder[stepIdx];
+      var grp = stepMap[coKey] || [];
+      grp.sort(function (a, b) {
+        var ga = String(a.parallelGroup || a.id);
+        var gb = String(b.parallelGroup || b.id);
+        if (ga !== gb) return ga.localeCompare(gb);
+        return String(a.id).localeCompare(String(b.id));
+      });
       html +=
         '<div class="pipeline-v-box stg-' +
-        i % 7 +
+        stepIdx % 7 +
         '">' +
         '<div class="pipeline-v-box-head">' +
         '<span class="pipeline-step-num">顺序 ' +
-        (i + 1) +
+        (stepIdx + 1) +
         " / " +
-        roots.length +
+        stepOrder.length +
         "</span>" +
-        '<span class="pipeline-v-title">任务 ' +
-        (i + 1) +
+        '<span class="pipeline-v-title">' +
+        (grp.length > 1 ? "并列 " + grp.length + " 项" : "任务") +
         "</span></div>" +
-        '<div class="pipeline-v-box-body">' +
-        renderFlowNodeRecursive(proj, allTs, roots[i], 0, chainCtx, null) +
-        "</div></div>";
-      if (i < roots.length - 1) {
+        '<div class="pipeline-v-box-body">';
+      if (grp.length > 1) {
+        html += '<div class="flow-children-row" title="同一步骤内并列任务">';
+        for (var pj = 0; pj < grp.length; pj++) {
+          if (pj > 0) html += '<div class="flow-sibling-arrow"><span class="flow-sibling-arrow-inner">→</span></div>';
+          html += '<div class="flow-child-branch">';
+          html += renderFlowNodeRecursive(proj, allTs, grp[pj], 0, chainCtx, null);
+          html += "</div>";
+        }
+        html += "</div>";
+      } else if (grp.length === 1) {
+        html += renderFlowNodeRecursive(proj, allTs, grp[0], 0, chainCtx, null);
+      }
+      html += "</div></div>";
+      if (stepIdx < stepOrder.length - 1) {
         html +=
-          '<div class="pipeline-v-arrow" title="下一任务（整体按截止日自上而下）">' +
+          '<div class="pipeline-v-arrow" title="下一顺序（环）">' +
           '<div class="arrow-shaft"></div>' +
           '<div class="arrow-head">▼</div>' +
           "</div>";
@@ -3610,7 +3680,7 @@
   function renderFlowOverlayInner(proj, ts) {
     var sub =
       proj && isChainProject(proj)
-        ? '<p class="muted" style="margin:0">串联：<strong>自上而下按截止日</strong>排列；步间▼、同父多子任务间→。卡片色条表示时间要求。点击任务查看详情；「新建任务」在末尾追加。</p>'
+        ? '<p class="muted" style="margin:0">串联：<strong>同一步骤内可并列</strong>（卡片底部「插入并列」）；步间▼；子任务在父节点下。点击任务查看详情；「新建任务」在末尾追加新的一环。</p>'
         : '<p class="muted" style="margin:0">项目流程：<strong>一级主任务按顺序向下</strong>，用▼表示先后；每个主任务下可挂子任务（横向）。点击卡片打开详情。</p>';
     var body = isChainProject(proj) ? renderChainStrip(proj, ts) : renderPipelineStrip(proj, ts);
     var banner = isChainProject(proj) ? renderChainProgressBanner(proj, ts) : renderPipelineProgressBanner(proj, ts);
@@ -3742,6 +3812,11 @@
     if (h === "#/profile") {
       if (state.view === "profile") return;
       state.view = "profile";
+      return;
+    }
+    if (h === "#/messages") {
+      if (state.view === "messages") return;
+      state.view = "messages";
       return;
     }
   }
@@ -5173,9 +5248,17 @@
           alert(r.msg || "导入失败");
           return;
         }
-        closeModal();
-        alert("已导入 " + parsed.tasks.length + " 条任务。");
-        render();
+        persistStateImmediateAsync()
+          .then(function () {
+            closeModal();
+            alert("已导入 " + parsed.tasks.length + " 条任务。");
+            render();
+          })
+          .catch(function () {
+            closeModal();
+            alert("已导入 " + parsed.tasks.length + " 条任务（同步到云端时请保持网络畅通）。");
+            render();
+          });
       }
       var cacheKey = currentMeetingParseKey();
       if (meetingParseCache.key === cacheKey && meetingParseCache.parsed) {
@@ -5222,13 +5305,23 @@
       want = "#/ai";
     } else if (state.view === "profile") {
       want = "#/profile";
+    } else if (state.view === "messages") {
+      want = "#/messages";
     } else {
       want = "";
     }
     if (/^#\/project\//.test(location.hash) && state.view !== "projects") {
       want = "";
     }
-    if (want === "" && (location.hash.indexOf("#/project/") === 0 || location.hash === "#/schedule" || location.hash === "#/ai" || location.hash === "#/projects" || location.hash === "#/profile")) {
+    if (
+      want === "" &&
+      (location.hash.indexOf("#/project/") === 0 ||
+        location.hash === "#/schedule" ||
+        location.hash === "#/ai" ||
+        location.hash === "#/projects" ||
+        location.hash === "#/profile" ||
+        location.hash === "#/messages")
+    ) {
       __hashLock = true;
       location.hash = "";
       setTimeout(function () {
@@ -5775,7 +5868,9 @@
       }
       if (inp) inp.value = "";
       save(state);
-      render();
+      persistStateImmediateAsync().then(function () {
+        render();
+      });
     }
     var send = document.getElementById("wg-chat-send");
     if (send) send.onclick = sendChatMsg;
@@ -5890,6 +5985,7 @@
       '<button type="button" class="' + navClass("dashboard") + '" data-nav="dashboard" title="项目概览与我的任务">工作台</button>' +
 '<button type="button" class="' + navClass("projects") + '" data-nav="projects" title="新建 / 打开项目，管理流程与任务">项目</button>' +
         '<button type="button" class="' + navClass("schedule") + '" data-nav="schedule" title="周历与截止 DDL、日程助手">日程</button>' +
+        '<button type="button" class="' + navClass("messages") + '" data-nav="messages" title="全员与私聊消息">消息</button>' +
         '<button type="button" class="' + navClass("ai") + '" data-nav="ai" title="优先 OpenRouter，失败则用本地规则">AI 中心</button>' +
       '<div style="flex:1"></div>' +
       '<button type="button" class="' + navClass("profile") + '" data-nav="profile" title="个人资料与头像设置">个人中心</button>' +
@@ -5918,6 +6014,7 @@
     if (state.view === "ai") bindAi();
     if (state.view === "projects") bindProjects();
     if (state.view === "profile") bindProfileCenter();
+    if (state.view === "messages") bindMessagesPage();
     syncHashFromState();
   }
 
@@ -5933,7 +6030,124 @@
     if (state.view === "schedule") return renderSchedulePageFull();
     if (state.view === "projects") return renderProjectsPage(proj);
     if (state.view === "ai") return renderAi();
+    if (state.view === "messages") return renderMessagesPageFull();
     return "";
+  }
+
+  function renderMessagesPageFull() {
+    if (!state.siteChat) state.siteChat = { global: [], threads: {} };
+    if (!state.chatUi) state.chatUi = { open: false, tab: "global", peer: "" };
+    if (!Array.isArray(state.siteChat.global)) state.siteChat.global = [];
+    if (!state.siteChat.threads) state.siteChat.threads = {};
+    var tab = state.chatUi.tab || "global";
+    var peer = state.chatUi.peer || "";
+    var msgs = [];
+    if (tab === "global") {
+      msgs = state.siteChat.global;
+    } else if (peer) {
+      var k = dmThreadKey(state.userName, peer);
+      msgs = state.siteChat.threads[k] || [];
+    }
+    var msgHtml = "";
+    for (var mi = 0; mi < msgs.length; mi++) {
+      var m = msgs[mi];
+      var tmt = m.createdAt ? esc(String(m.createdAt).slice(0, 16).replace("T", " ")) : "";
+      msgHtml +=
+        '<div class="card wg-msg" style="padding:0.55rem 0.65rem;margin-bottom:0.45rem;font-size:13px"><div><span class="wg-msg-from" style="font-weight:600">' +
+        esc(m.from) +
+        '</span><span class="wg-msg-time muted" style="font-size:11px;margin-left:0.35rem">' +
+        tmt +
+        "</span></div><div style="margin-top:0.35rem;line-height:1.5">' +
+        esc(m.body) +
+        "</div></div>";
+    }
+    if (!msgHtml) msgHtml = '<p class="muted" style="margin:0">暂无消息。</p>';
+    var ph =
+      tab === "direct" && !peer ? "请先在流程图中点击成员头像发起私聊，或在此输入对方显示名" : "输入消息，Enter 发送";
+    return (
+      '<div class="page-header"><h2>消息</h2><p class="page-subtitle">全员广播与成员私聊（与右下角快捷面板相同数据）；发送后会写入账号状态并同步云端。</p></div>' +
+      '<div class="card" style="padding:0.75rem">' +
+      '<div style="display:flex;gap:0.35rem;flex-wrap:wrap;margin-bottom:0.65rem">' +
+      '<button type="button" class="btn btn-sm' +
+      (tab === "global" ? " btn-primary" : "") +
+      '" data-msgp-tab="global">全员</button>' +
+      '<button type="button" class="btn btn-sm' +
+      (tab === "direct" ? " btn-primary" : "") +
+      '" data-msgp-tab="direct">私聊</button>' +
+      '<input type="text" class="input" id="msgp-peer" placeholder="私聊显示名" value="' +
+      esc(peer) +
+      '" style="max-width:220px;font-size:13px" />' +
+      "</div>" +
+      '<div class="wg-chat-messages" id="msgp-messages" style="min-height:200px;max-height:min(60vh,520px)">' +
+      msgHtml +
+      "</div>" +
+      '<div class="wg-chat-input-row" style="margin-top:0.65rem">' +
+      '<input type="text" id="msgp-input" placeholder="' +
+      esc(ph) +
+      '" />' +
+      '<button type="button" class="btn btn-primary btn-sm" id="msgp-send">发送</button></div></div>'
+    );
+  }
+
+  function bindMessagesPage() {
+    var tabs = appEl.querySelectorAll("[data-msgp-tab]");
+    for (var ti = 0; ti < tabs.length; ti++) {
+      tabs[ti].onclick = function () {
+        var t = this.getAttribute("data-msgp-tab");
+        state.chatUi.tab = t;
+        if (t === "global") state.chatUi.peer = "";
+        save(state);
+        render();
+      };
+    }
+    var peerInp = document.getElementById("msgp-peer");
+    if (peerInp) {
+      peerInp.onchange = function () {
+        state.chatUi.peer = String(peerInp.value || "").trim();
+        state.chatUi.tab = "direct";
+        save(state);
+        render();
+      };
+    }
+    function sendMsgPage() {
+      var inp = document.getElementById("msgp-input");
+      var body = (inp && inp.value) || "";
+      if (!body.trim()) return;
+      if (!state.siteChat) state.siteChat = { global: [], threads: {} };
+      if (!state.siteChat.global) state.siteChat.global = [];
+      if (!state.siteChat.threads) state.siteChat.threads = {};
+      var entry = {
+        id: uid(),
+        from: state.userName,
+        body: body.trim(),
+        createdAt: new Date().toISOString(),
+      };
+      if (state.chatUi.tab === "global") {
+        state.siteChat.global.push(entry);
+      } else {
+        var peer = (peerInp && peerInp.value.trim()) || state.chatUi.peer || "";
+        if (!peer) {
+          alert("请填写私聊对方显示名");
+          return;
+        }
+        state.chatUi.peer = peer;
+        var dk = dmThreadKey(state.userName, peer);
+        if (!state.siteChat.threads[dk]) state.siteChat.threads[dk] = [];
+        state.siteChat.threads[dk].push(entry);
+      }
+      save(state);
+      persistStateImmediateAsync().then(function () {
+        render();
+      });
+    }
+    var send = document.getElementById("msgp-send");
+    if (send) send.onclick = sendMsgPage;
+    var inp2 = document.getElementById("msgp-input");
+    if (inp2) {
+      inp2.onkeydown = function (e) {
+        if (e.key === "Enter") sendMsgPage();
+      };
+    }
   }
 
   function renderDashboardOverviewCard() {
@@ -6153,7 +6367,7 @@
     var ts = getFilteredTasks(proj);
     var ch = isChainProject(proj);
     var hint = ch
-        ? '<p class="muted" style="margin:0 0 0.55rem;font-size:12px">卡片空白处打开详情；底部可「下方插入/插入并列」同级、「子任务」下级、编辑、删除。</p>'
+        ? '<p class="muted" style="margin:0 0 0.55rem;font-size:12px">卡片空白处打开详情；底部可「插入并列」同级、「子任务」下级、编辑、删除。</p>'
         : '<p class="muted" style="margin:0 0 0.55rem;font-size:12px">卡片空白处打开详情；底部可插入并列、子任务、编辑、删除。</p>';
     var banner = ch ? renderChainProgressBanner(proj, ts) : renderPipelineProgressBanner(proj, ts);
     var strip = ch ? renderChainStrip(proj, ts) : renderPipelineStrip(proj, ts);
@@ -8343,27 +8557,50 @@
     });
     if (!proj) return;
     var ch = isChainProject(proj);
-    var t = existing || {
-      id: uid(),
-      projectId: projectId,
-      title: "",
-      description: "",
-      status: "todo",
-      priority: "P2",
-      assignee: state.userName,
-      collaborators: "",
-      createdBy: state.userName,
-      parentId: parentIdOpt || null,
-      pipelineStage: 0,
-      flowOrder: !ch && opts.flowOrder != null && opts.flowOrder !== "" ? Number(opts.flowOrder) : undefined,
-      parallelGroup: !ch && opts.parallelGroup ? String(opts.parallelGroup) : undefined,
-      chainOrder: ch && !parentIdOpt ? nextChainOrder(projectId) : undefined,
-      startTime: "",
-      deadline: "",
-      estimatedHours: "",
-      actualHours: "",
-      tags: "",
-    };
+    var t;
+    if (existing) {
+      t = existing;
+    } else {
+      var coInit = undefined;
+      var pgInit = undefined;
+      if (ch && !parentIdOpt) {
+        if (opts.chainParallelWithRoot) {
+          var sibBase = state.tasks.find(function (x) {
+            return x.id === opts.chainParallelWithRoot;
+          });
+          if (sibBase) {
+            if (!sibBase.parallelGroup) sibBase.parallelGroup = sibBase.id;
+            coInit = sibBase.chainOrder != null ? sibBase.chainOrder : 0;
+            pgInit = String(sibBase.parallelGroup || sibBase.id);
+          } else {
+            coInit = nextChainOrder(projectId);
+          }
+        } else {
+          coInit = nextChainOrder(projectId);
+        }
+      }
+      t = {
+        id: uid(),
+        projectId: projectId,
+        title: "",
+        description: "",
+        status: "todo",
+        priority: "P2",
+        assignee: state.userName,
+        collaborators: "",
+        createdBy: state.userName,
+        parentId: parentIdOpt || null,
+        pipelineStage: 0,
+        flowOrder: !ch && opts.flowOrder != null && opts.flowOrder !== "" ? Number(opts.flowOrder) : undefined,
+        parallelGroup: ch ? pgInit : !ch && opts.parallelGroup ? String(opts.parallelGroup) : undefined,
+        chainOrder: coInit,
+        startTime: "",
+        deadline: "",
+        estimatedHours: "",
+        actualHours: "",
+        tags: "",
+      };
+    }
     var parents = tasksOfProject(state, projectId).filter(function (x) { return x.id !== t.id; });
     var popt = '<option value="">（无）</option>';
     for (var i = 0; i < parents.length; i++) {
@@ -8494,22 +8731,57 @@
     var coms = state.comments.filter(function (c) {
       return c.taskId === t.id;
     });
+    coms.sort(function (a, b) {
+      return String(a.createdAt || "").localeCompare(String(b.createdAt || ""));
+    });
+    var byId = {};
+    for (var ci0 = 0; ci0 < coms.length; ci0++) {
+      byId[coms[ci0].id] = coms[ci0];
+    }
+    function commentDepth(c) {
+      var d = 0;
+      var x = c;
+      while (x && x.parentId) {
+        d++;
+        x = byId[x.parentId];
+        if (d > 40) break;
+      }
+      return d;
+    }
     var chtml = "";
     for (var i = 0; i < coms.length; i++) {
       var c = coms[i];
       var ct = c.createdAt ? esc(String(c.createdAt).slice(0, 16).replace("T", " ")) : "";
+      var dep = commentDepth(c);
       chtml +=
-        '<div class="card" style="padding:0.45rem 0.55rem;margin-bottom:0.35rem;font-size:12px;line-height:1.45">' +
+        '<div class="card" style="padding:0.45rem 0.55rem;margin-bottom:0.35rem;font-size:12px;line-height:1.45;margin-left:' +
+        dep * 14 +
+        'px">' +
         "<strong>" +
         esc(c.author) +
         "</strong>" +
         (ct ? '<span class="muted" style="font-size:10px;margin-left:0.35rem">' + ct + "</span>" : "") +
+        (c.parentId ? '<span class="muted" style="font-size:10px;margin-left:0.35rem">· 回复</span>' : "") +
         "<div style=\"margin-top:0.25rem\">" +
         esc(c.body) +
-        "</div></div>";
+        '</div><button type="button" class="btn btn-sm" data-nv-reply="' +
+        esc(c.id) +
+        '" style="margin-top:0.35rem">回复</button></div>';
     }
     var stageRowLabel = projForTask && isChainProject(projForTask) ? "串联顺序" : "任务顺序";
-    var insSibLabel = projForTask && isChainProject(projForTask) && !t.parentId ? "下方插入" : "插入并列";
+    var insSibLabel = "插入并列";
+    var stNvOpts = "";
+    for (var svi = 0; svi < STATUSES.length; svi++) {
+      var sv = STATUSES[svi];
+      stNvOpts +=
+        '<option value="' +
+        sv +
+        '"' +
+        (t.status === sv ? " selected" : "") +
+        ">" +
+        esc(STATUS_LABEL[sv] || sv) +
+        "</option>";
+    }
     var siblingBtn =
       '<button type="button" class="btn btn-sm" id="nv-insert-sibling" title="新建同级任务">' + insSibLabel + "</button>";
     var childBtn = '<button type="button" class="btn btn-sm" id="nv-child">＋ 新建子任务</button>';
@@ -8525,7 +8797,9 @@
         '</label><div>' +
         esc(projForTask ? stageLabel(projForTask, t) : "—") +
         "</div></div>" +
-        '<div class="row"><label>状态</label><span class="' + badgeClass(t.status) + '">' + esc(STATUS_LABEL[t.status] || t.status) + "</span></div>" +
+        '<div class="row"><label>状态</label><select id="nv-status" class="input" style="width:auto;min-width:128px">' +
+        stNvOpts +
+        "</select></div>" +
         '<div class="row"><label>优先级</label><span class="' + prioClass(t.priority) + '">' + esc(t.priority) + "</span></div>" +
         '<div class="row"><label>负责人</label><div class="fn-people">' +
         (t.assignee
@@ -8551,9 +8825,10 @@
         '<div class="row"><label>标签</label><div>' + esc(t.tags || "—") + "</div></div>" +
         '<div class="row"><label>关系</label><div class="muted" style="font-size:12px">' + (relLines.length ? esc(relLines.join("；")) : "无") + "</div></div>" +
         "<h4 style=\"margin:0.75rem 0 0.35rem;font-size:0.9rem\">任务讨论区</h4>" +
-        '<p class="muted" style="margin:0 0 0.35rem;font-size:11px">与负责人、协作人沟通任务进展；可 @成员。</p>' +
+        '<p class="muted" style="margin:0 0 0.35rem;font-size:11px">与负责人、协作人沟通任务进展；可 @成员，可回复某条消息。</p>' +
+        '<input type="hidden" id="nv-reply-parent" value="" />' +
         chtml +
-        '<input class="input" id="nv-com" placeholder="参与讨论，可 @用户名" style="margin-top:0.5rem" />' +
+        '<input class="input" id="nv-com" placeholder="参与讨论，可 @用户名；点「回复」可串楼" style="margin-top:0.5rem" />' +
         '<div class="flex" style="margin-top:0.5rem;justify-content:space-between;align-items:center">' +
         '<div class="flex" style="gap:0.35rem;flex-wrap:wrap">' +
         siblingBtn +
@@ -8565,7 +8840,27 @@
         '<button type="button" class="btn btn-primary" id="nv-send">发送到讨论区</button></div></div>'
     );
     document.getElementById("nv-close").onclick = closeModal;
+    var nvSt = document.getElementById("nv-status");
+    if (nvSt) {
+      nvSt.onchange = function () {
+        t.status = nvSt.value;
+        save(state);
+        persistStateImmediateAsync();
+      };
+    }
     if (modalEl) {
+      var rbs = modalEl.querySelectorAll("[data-nv-reply]");
+      for (var rbi = 0; rbi < rbs.length; rbi++) {
+        rbs[rbi].onclick = function (ev) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          var rid = this.getAttribute("data-nv-reply");
+          var rp = document.getElementById("nv-reply-parent");
+          if (rp) rp.value = rid || "";
+          var cin = document.getElementById("nv-com");
+          if (cin) cin.focus();
+        };
+      }
       var profChips = modalEl.querySelectorAll("[data-person-profile]");
       for (var pci = 0; pci < profChips.length; pci++) {
         profChips[pci].onclick = function (ev) {
@@ -8614,23 +8909,29 @@
       while ((m = re.exec(body))) {
         at.push(m[1]);
       }
+      var rpEl = document.getElementById("nv-reply-parent");
+      var pId = rpEl && rpEl.value ? String(rpEl.value) : "";
       state.comments.push({
         id: uid(),
         taskId: t.id,
         author: state.userName,
         body: body.trim(),
-        parentId: null,
+        parentId: pId || null,
         at: at,
         createdAt: new Date().toISOString(),
       });
-      closeModal();
-      render();
-      setTimeout(function () {
-        var nt = state.tasks.find(function (x) {
-          return x.id === t.id;
-        });
-        if (nt) openTaskDrawer(nt);
-      }, 0);
+      if (rpEl) rpEl.value = "";
+      save(state);
+      persistStateImmediateAsync().then(function () {
+        closeModal();
+        render();
+        setTimeout(function () {
+          var nt = state.tasks.find(function (x) {
+            return x.id === t.id;
+          });
+          if (nt) openTaskDrawer(nt);
+        }, 0);
+      });
     };
   }
 
