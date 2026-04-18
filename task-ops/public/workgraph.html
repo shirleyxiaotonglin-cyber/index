@@ -11,6 +11,7 @@
     【手机/其他电脑访问本页】不要用 127.0.0.1。请用「电脑局域网 IP」，例如 http://192.168.1.10:8080/index.html
     终端执行仓库根目录 ./serve-lan.sh（监听 0.0.0.0）。Supabase 控制台 → Authentication → URL 配置 → Redirect URLs
     增加 http://你的局域网IP:8080/** ，否则登录/验证可能失败。
+    【验证邮件慢/进垃圾箱】默认走 Supabase 内置发信，可能延迟数分钟。加快投递：Supabase → Authentication → Emails → SMTP Settings → 启用自定义 SMTP（如 Resend、SendGrid、阿里云邮件等）。
   -->
   <script>
     window.SUPABASE_URL = "https://eueryfsdyesxcrwotvnz.supabase.co";
@@ -5852,12 +5853,20 @@
             return;
           }
           setMsg("正在注册…");
+          if (btnUp) btnUp.disabled = true;
+          var redirectTo = "";
+          try {
+            redirectTo = window.location.origin + window.location.pathname + (window.location.search || "");
+          } catch (eR) {}
           ensureSupabaseClient()
             .then(function () {
               return __sb.auth.signUp({
                 email: u,
                 password: pw,
-                options: { data: { display_name: String(u).split("@")[0] || u } },
+                options: {
+                  emailRedirectTo: redirectTo || undefined,
+                  data: { display_name: String(u).split("@")[0] || u },
+                },
               });
             })
             .then(function (res) {
@@ -5868,7 +5877,9 @@
               if (res.data && res.data.session && res.data.user) {
                 return applySupabaseUser(res.data.user);
               }
-              setMsg("注册成功。若项目启用了邮箱验证，请查收邮件后登录。");
+              setMsg(
+                "注册成功。验证邮件已发送，请查收（含垃圾邮件箱），通常几分钟内到达；若长期很慢，可由管理员在 Supabase → Authentication → SMTP 配置自定义发信以加快投递。收到后点击邮件内链接再登录。"
+              );
               return null;
             })
             .then(function () {
@@ -5876,6 +5887,9 @@
             })
             .catch(function (e) {
               setMsg((e && e.message) || "注册失败");
+            })
+            .finally(function () {
+              if (btnUp) btnUp.disabled = false;
             });
           return;
         }
