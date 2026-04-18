@@ -3,17 +3,29 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>项目任务协作台 — 管项目、跟任务、看进度</title>
+  <!--
+    【Supabase 在线协作】在下方或单独脚本中设置（勿把 service role 写入前端）：
+    window.SUPABASE_URL = "https://你的项目.supabase.co";
+    window.SUPABASE_ANON_KEY = "anon 公钥";
+    并在 Supabase SQL Editor 执行 supabase/schema.sql；若刷新后数据变空，再执行 supabase/fix_rls_owner_access.sql（修正 RLS）。Publication 启用 Realtime。
+    【手机/其他电脑访问本页】不要用 127.0.0.1。请用「电脑局域网 IP」，例如 http://192.168.1.10:8080/index.html
+    终端执行仓库根目录 ./serve-lan.sh（监听 0.0.0.0）。Supabase 控制台 → Authentication → URL 配置 → Redirect URLs
+    增加 http://你的局域网IP:8080/** ，否则登录/验证可能失败。
+  -->
   <script>
+    window.SUPABASE_URL = "https://eueryfsdyesxcrwotvnz.supabase.co";
+    window.SUPABASE_ANON_KEY = "sb_publishable_ZJqN-H9KA6eSPV1zun1QyQ_Rl-MAomi";
+    /** 会议纪要 AI：显式指定则优先；否则走 apiBase / 同源；仍无时用 FALLBACK（任意设备含 file://、局域网） */
     window.WORKGRAPH_AI_PARSE_ORIGIN = "";
     window.WORKGRAPH_AI_PARSE_ORIGIN_FALLBACK = "https://index-ecru-iota.vercel.app";
   </script>
+   <title>项目任务协作台 — 管项目、跟任务、看进度</title>
   <style>
     :root {
-      --bg: #f4f6f9;
+      --bg: radial-gradient(circle at 12% 16%, #eef4ff 0%, #f6f9ff 36%, #f3f6fb 100%);
       --sidebar: #ffffff;
-      --card: #ffffff;
-      --border: #e8ecf1;
+      --card: rgba(255, 255, 255, 0.95);
+      --border: #e2e8f0;
       --text: #0f172a;
       --muted: #64748b;
       --primary: #dc2626;
@@ -23,10 +35,10 @@
       --surface-muted: #f1f5f9;
       --danger: #b91c1c;
       --ok: #15803d;
-      --radius: 12px;
-      --radius-sm: 8px;
-      --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
-      --shadow: 0 4px 20px rgba(15, 23, 42, 0.06);
+      --radius: 14px;
+      --radius-sm: 10px;
+      --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+      --shadow: 0 12px 32px rgba(30, 41, 59, 0.08);
       --side-bg: linear-gradient(180deg, #b91c1c 0%, #991b1b 46%, #7f1d1d 100%);
       --side-border: #7f1d1d;
     }
@@ -48,7 +60,7 @@
       position: fixed; top: 0; left: 0; bottom: 0;
       max-height: 100vh; overflow: auto;
       border-radius: 0;
-      box-shadow: 8px 0 24px rgba(127, 29, 29, 0.22);
+      box-shadow: 8px 0 24px rgba(127, 29, 29, 0.3);
     }
     .side h1 {
       font-size: 0.875rem; margin: 0 0 0.85rem; padding: 0 0.45rem; color: #f8fafc;
@@ -132,6 +144,7 @@
     .card {
       background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
       padding: 1.05rem 1.2rem; margin-bottom: 1rem; box-shadow: var(--shadow-sm);
+      backdrop-filter: blur(6px);
     }
     h2 { font-size: 1.05rem; margin: 0 0 0.65rem; font-weight: 650; letter-spacing: -0.02em; color: var(--text); }
     h3 { font-size: 0.95rem; font-weight: 650; margin: 0.5rem 0 0.4rem; color: var(--text); letter-spacing: -0.01em; }
@@ -141,8 +154,8 @@
       background: #fff; color: var(--text); cursor: pointer; font-size: 13px;
       box-shadow: var(--shadow-sm); transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
     }
-    .btn:hover { border-color: #cbd5e1; background: #f8fafc; }
-    .btn-primary { background: var(--primary); border-color: transparent; color: #fff; box-shadow: 0 1px 3px rgba(220, 38, 38, 0.25); }
+    .btn:hover { border-color: #fecaca; background: #fff7f7; }
+    .btn-primary { background: var(--primary); border-color: transparent; color: #fff; box-shadow: 0 6px 16px rgba(220, 38, 38, 0.28); }
     .btn-primary:hover { background: var(--primary-hover); border-color: transparent; color: #fff; }
     .btn-sm { padding: 0.28rem 0.55rem; font-size: 12px; border-radius: 6px; }
     .input, select, textarea {
@@ -150,7 +163,7 @@
       background: #fafbfc; color: var(--text); font: inherit; transition: border-color 0.15s, box-shadow 0.15s;
     }
     .input:focus, select:focus, textarea:focus {
-      outline: none; border-color: #93c5fd; background: #fff; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+      outline: none; border-color: #f87171; background: #fff; box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.14);
     }
     textarea { min-height: 72px; resize: vertical; }
     .grid-2 { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
@@ -287,8 +300,47 @@
     .flow-node.fn-sub { font-size: 11px; padding: 0.38rem 0.45rem; opacity: 0.98; }
     .flow-node:hover { border-color: #cbd5e1; box-shadow: var(--shadow-sm); }
     .flow-node.fn-chain-past:hover { border-color: #cbd5e1; }
-    .flow-node .fn-title { font-weight: 600; margin-bottom: 0.25rem; }
+    .flow-node .fn-title { font-weight: 600; margin-bottom: 0.25rem; line-height: 1.35; }
     .flow-node .fn-meta { font-size: 11px; color: var(--muted); }
+    .fn-status-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.5rem; margin-top: 0.2rem; }
+    .fn-dep { font-size: 10px; color: #b45309; }
+    .fn-people { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.45rem; align-items: center; }
+    .flow-person-chip {
+      display: inline-flex; align-items: center; gap: 0.3rem; max-width: 100%;
+      padding: 0.12rem 0.35rem 0.12rem 0.12rem; border-radius: 999px;
+      background: #f8fafc; border: 1px solid #e2e8f0; cursor: pointer; font-size: 11px;
+      transition: background 0.12s, border-color 0.12s;
+    }
+    .flow-person-chip:hover { background: #eff6ff; border-color: #93c5fd; }
+    .flow-person-chip .flow-av {
+      width: 22px; height: 22px; border-radius: 999px; overflow: hidden; flex-shrink: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, #fecaca, #fee2e2); font-size: 11px; font-weight: 700; color: #991b1b;
+    }
+    .flow-person-chip .flow-av img { width: 100%; height: 100%; object-fit: cover; }
+    .flow-person-chip .flow-person-name { max-width: 7.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #334155; }
+    .fn-disc { font-size: 10px; color: #64748b; margin-top: 0.35rem; }
+    .wg-chat-fab {
+      position: fixed; right: 1.1rem; bottom: 1.1rem; z-index: 400;
+      padding: 0.55rem 0.85rem; border-radius: 999px; border: none; cursor: pointer;
+      background: linear-gradient(135deg, #dc2626, #b91c1c); color: #fff; font-weight: 600; font-size: 13px;
+      box-shadow: 0 8px 28px rgba(220, 38, 38, 0.35);
+    }
+    .wg-chat-panel {
+      position: fixed; right: 1.1rem; bottom: 4.25rem; z-index: 399; width: min(100vw - 2rem, 380px); max-height: min(70vh, 480px);
+      display: flex; flex-direction: column; background: #fff; border: 1px solid var(--border); border-radius: 12px;
+      box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18); overflow: hidden;
+    }
+    .wg-chat-panel.hidden { display: none !important; }
+    .wg-chat-head { display: flex; align-items: center; gap: 0.35rem; padding: 0.55rem 0.65rem; border-bottom: 1px solid #f1f5f9; background: #fafafa; }
+    .wg-chat-head button { font-size: 11px; padding: 0.2rem 0.45rem; border-radius: 6px; border: 1px solid #e2e8f0; background: #fff; cursor: pointer; }
+    .wg-chat-head button.wg-tab-active { border-color: #fca5a5; background: #fff7f7; color: #991b1b; font-weight: 600; }
+    .wg-chat-messages { flex: 1; min-height: 160px; overflow-y: auto; padding: 0.5rem 0.65rem; font-size: 12px; background: #f8fafc; }
+    .wg-msg { margin-bottom: 0.45rem; line-height: 1.45; }
+    .wg-msg .wg-msg-from { font-weight: 600; color: #0f172a; }
+    .wg-msg .wg-msg-time { font-size: 10px; color: #94a3b8; margin-left: 0.35rem; }
+    .wg-chat-input-row { display: flex; gap: 0.35rem; padding: 0.5rem; border-top: 1px solid #f1f5f9; background: #fff; }
+    .wg-chat-input-row input { flex: 1; font-size: 12px; padding: 0.35rem 0.5rem; border-radius: 8px; border: 1px solid #e2e8f0; }
     .flow-node-actions {
       display: flex; flex-wrap: wrap; gap: 0.25rem; align-items: center;
       margin-top: 0.45rem; padding-top: 0.45rem; border-top: 1px solid #f1f5f9;
@@ -496,20 +548,24 @@
     }
     .auth-page {
       min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1.5rem;
-      background: linear-gradient(165deg, #f8fafc 0%, #e2e8f0 100%);
+      background: radial-gradient(circle at 14% 20%, #fee2e2 0%, #fecaca 34%, #450a0a 100%);
     }
     .auth-card {
-      width: 100%; max-width: 400px; background: var(--card); border: 1px solid var(--border); border-radius: 12px;
-      padding: 1.35rem 1.25rem; box-shadow: 0 12px 40px rgba(15, 23, 42, 0.08);
+      width: 100%; max-width: 420px; background: rgba(2, 6, 23, 0.92); border: 1px solid #1e293b; border-radius: 14px;
+      padding: 1.35rem 1.25rem; box-shadow: 0 18px 54px rgba(2, 6, 23, 0.35); color: #e2e8f0;
+      backdrop-filter: blur(8px);
     }
-    .auth-card h2 { margin: 0 0 0.25rem; font-size: 1.2rem; }
+    .auth-card h2 { margin: 0 0 0.25rem; font-size: 1.2rem; color: #f8fafc; }
+    .auth-card .muted { color: #94a3b8; }
     .auth-tabs { display: flex; gap: 0.35rem; margin-bottom: 1rem; }
     .auth-tab {
-      flex: 1; padding: 0.4rem; border-radius: 8px; border: 1px solid var(--border); background: #f8fafc;
-      color: var(--text); cursor: pointer; font: inherit; font-size: 13px;
+      flex: 1; padding: 0.45rem; border-radius: 10px; border: 1px solid #334155; background: #0f172a;
+      color: #cbd5e1; cursor: pointer; font: inherit; font-size: 13px;
     }
-    .auth-tab.active { border-color: var(--primary); background: rgba(220, 38, 38, 0.08); color: #991b1b; font-weight: 600; }
-    .auth-msg { font-size: 12px; color: var(--danger); min-height: 1.25rem; margin: 0 0 0.5rem; }
+    .auth-tab.active { border-color: #f87171; background: rgba(220, 38, 38, 0.22); color: #fee2e2; font-weight: 600; }
+    .auth-card .input { background: #020617; border-color: #1e293b; color: #e2e8f0; }
+    .auth-card .input:focus { border-color: #f87171; box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.2); }
+    .auth-msg { font-size: 12px; color: #fca5a5; min-height: 1.25rem; margin: 0 0 0.5rem; }
     .chain-linear .pipeline-v-title { font-size: 0.92rem; }
   </style>
 </head>
@@ -537,6 +593,25 @@
   var __syncingCrossAccountShares = false;
   var __forceLocalStorageMode = false;
   var __bootstrapError = "";
+  /** Supabase 协作：在页面中设置 window.SUPABASE_URL 与 window.SUPABASE_ANON_KEY（见文件顶部注释） */
+  var __sb = null;
+  var __sbSaveTimer = null;
+  var __sbReloadTimer = null;
+  var __sbChannel = null;
+  /** 仅在用户本地删除项目后置位，避免每次 flush 都扫描孤儿项目 */
+  var __sbOrphanPurgeNeeded = false;
+  var __applyingRemoteSupabase = false;
+  var projectOwnerIds = {};
+
+  function useSupabaseMode() {
+    try {
+      var u = typeof window.SUPABASE_URL === "string" && window.SUPABASE_URL.trim();
+      var k = typeof window.SUPABASE_ANON_KEY === "string" && window.SUPABASE_ANON_KEY.trim();
+      return !!(u && k);
+    } catch (e) {
+      return false;
+    }
+  }
 
   function shouldForceLocalByHost() {
     try {
@@ -569,6 +644,7 @@
   __forceLocalStorageMode = localModeFromQueryOrStorage();
 
   function useServerStorage() {
+    if (useSupabaseMode()) return false;
     if (__forceLocalStorageMode) return false;
     try {
       var p = window.location.protocol;
@@ -631,7 +707,9 @@
     return "";
   }
 
-  /** meetingAiApiBase 为 "" 时表同源相对 /api，合法 */
+  /**
+   * 是否可请求会议纪要 AI：meetingAiApiBase 为 "" 时表示「同源 + 相对路径 /api」，合法，不能用 !meetingAiApiBase() 误判。
+   */
   function hasMeetingAiApiEndpoint() {
     var b;
     try {
@@ -647,7 +725,7 @@
     return false;
   }
 
-  /** 仅用于 /api/ai/parse-meeting；跨域时 credentials 用 omit */
+  /** 仅用于 /api/ai/parse-meeting；跨域时 credentials 用 omit，避免 CORS 与 cookie 冲突 */
   function meetingAiFetch(path, opts) {
     opts = opts || {};
     var base = meetingAiApiBase();
@@ -677,6 +755,621 @@
       opts.body = JSON.stringify(opts.body);
     }
     return fetch(url, opts);
+  }
+
+  async function ensureSupabaseClient() {
+    if (__sb) return __sb;
+    if (!useSupabaseMode()) throw new Error("未配置 Supabase");
+    var mod;
+    try {
+      mod = await import("https://esm.sh/@supabase/supabase-js@2");
+    } catch (e1) {
+      try {
+        mod = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm");
+      } catch (e2) {
+        throw new Error("无法加载 Supabase SDK，请检查网络或防火墙");
+      }
+    }
+    __sb = mod.createClient(window.SUPABASE_URL.trim(), window.SUPABASE_ANON_KEY.trim(), {
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+    });
+    return __sb;
+  }
+
+  function sbStateCacheKey(uid) {
+    return "workgraph_sb_state_v1_" + String(uid || "");
+  }
+  function persistSbStateCache(uid, st) {
+    if (!uid || !st) return;
+    try {
+      localStorage.setItem(
+        sbStateCacheKey(uid),
+        JSON.stringify({ v: 1, uid: uid, at: Date.now(), state: st })
+      );
+    } catch (e) {}
+  }
+  function readSbStateCache(uid) {
+    if (!uid) return null;
+    try {
+      var j = localStorage.getItem(sbStateCacheKey(uid));
+      if (!j) return null;
+      var o = JSON.parse(j);
+      if (!o || String(o.uid) !== String(uid) || !o.state) return null;
+      if (o.at && Date.now() - o.at > 7 * 24 * 60 * 60 * 1000) return null;
+      return o.state;
+    } catch (e) {
+      return null;
+    }
+  }
+  function clearSbStateCache(uid) {
+    if (!uid) return;
+    try {
+      localStorage.removeItem(sbStateCacheKey(uid));
+    } catch (e) {}
+  }
+  async function resolveSupabaseSession() {
+    try {
+      var r = await __sb.auth.getSession();
+      var session = r.data.session;
+      if (session) return session;
+      await new Promise(function (res) {
+        setTimeout(res, 40);
+      });
+      r = await __sb.auth.getSession();
+      session = r.data.session;
+      if (session) return session;
+      await new Promise(function (res) {
+        setTimeout(res, 120);
+      });
+      r = await __sb.auth.getSession();
+      session = r.data.session;
+      if (session) return session;
+      try {
+        var ref = await __sb.auth.refreshSession();
+        if (ref.data && ref.data.session) return ref.data.session;
+      } catch (e2) {}
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function taskFromRow(row) {
+    return {
+      id: row.id,
+      projectId: row.project_id,
+      title: row.title || "",
+      description: row.description || "",
+      status: row.status || "todo",
+      priority: row.priority || "P2",
+      assignee: row.assignee || "",
+      collaborators: row.collaborators || "",
+      createdBy: row.created_by || "",
+      parentId: row.parent_id || null,
+      pipelineStage: row.pipeline_stage != null ? row.pipeline_stage : 0,
+      chainOrder: row.chain_order != null ? row.chain_order : null,
+      startTime: row.start_time || "",
+      deadline: row.deadline || "",
+      estimatedHours: row.estimated_hours != null ? Number(row.estimated_hours) : 0,
+      actualHours: row.actual_hours != null ? Number(row.actual_hours) : 0,
+      tags: row.tags || "",
+    };
+  }
+
+  function taskRowFromTask(t) {
+    return {
+      id: t.id,
+      project_id: t.projectId,
+      title: t.title || "",
+      description: t.description || "",
+      status: t.status || "todo",
+      priority: t.priority || "P2",
+      assignee: t.assignee || "",
+      collaborators: t.collaborators || "",
+      created_by: t.createdBy || "",
+      parent_id: t.parentId || null,
+      pipeline_stage: t.pipelineStage != null ? t.pipelineStage : 0,
+      chain_order: t.chainOrder != null ? t.chainOrder : null,
+      start_time: t.startTime || "",
+      deadline: t.deadline || "",
+      estimated_hours: t.estimatedHours != null ? t.estimatedHours : 0,
+      actual_hours: t.actualHours != null ? t.actualHours : 0,
+      tags: t.tags || "",
+      updated_at: new Date().toISOString(),
+    };
+  }
+
+  function projectExtraFromProj(p) {
+    var skip = {
+      id: 1,
+      name: 1,
+      archived: 1,
+      createdAt: 1,
+      owner: 1,
+      members: 1,
+      pipelineStages: 1,
+      chainMode: 1,
+    };
+    var ex = {};
+    for (var k in p) {
+      if (skip[k] || k.indexOf("_") === 0) continue;
+      ex[k] = p[k];
+    }
+    return ex;
+  }
+
+  async function loadStateFromSupabase(userId) {
+    await ensureSupabaseClient();
+    var sb = __sb;
+    var displayName = "";
+    var avatar = "👤";
+    var profileTitle = "";
+    var profileBio = "";
+    var boot = await Promise.all([
+      sb.from("profiles").select("*").eq("id", userId).maybeSingle(),
+      sb.from("project_members").select("project_id").eq("user_id", userId),
+      sb.from("projects").select("id").eq("owner_id", userId),
+    ]);
+    var profRes = boot[0];
+    if (profRes.data) {
+      displayName = profRes.data.display_name || "";
+      avatar = profRes.data.avatar || "👤";
+      profileTitle = profRes.data.profile_title || "";
+      profileBio = profRes.data.profile_bio || "";
+    }
+    var memRes = boot[1];
+    var projectIds = (memRes.data || []).map(function (m) {
+      return m.project_id;
+    });
+    var ownRes = boot[2];
+    var ownIds = (ownRes.data || []).map(function (r) {
+      return r.id;
+    });
+    var idSet = {};
+    var mi;
+    for (mi = 0; mi < projectIds.length; mi++) idSet[projectIds[mi]] = true;
+    for (mi = 0; mi < ownIds.length; mi++) idSet[ownIds[mi]] = true;
+    projectIds = Object.keys(idSet);
+    projectOwnerIds = {};
+    if (!projectIds.length) {
+      var fromCache = readSbStateCache(userId);
+      if (fromCache && fromCache.projects && fromCache.projects.length) {
+        var reb = JSON.parse(JSON.stringify(fromCache));
+        migrateStateObject(reb);
+        postLoadState(reb);
+        fixCurrentProjectPointer(reb);
+        persistSbStateCache(userId, reb);
+        scheduleSupabaseFlush();
+        return reb;
+      }
+      var empty = emptyState(displayName || activeAccount || "用户");
+      empty.userName = displayName || empty.userName;
+      empty.avatar = avatar;
+      empty.profileTitle = profileTitle;
+      empty.profileBio = profileBio;
+      return empty;
+    }
+    if (ownIds.length) {
+      await Promise.all(
+        ownIds.map(function (oid) {
+          return sb.from("project_members").upsert(
+            { project_id: oid, user_id: userId, role: "owner" },
+            { onConflict: "project_id,user_id" }
+          );
+        })
+      );
+    }
+    var projRes = await sb.from("projects").select("*").in("id", projectIds);
+    var projects = projRes.data || [];
+    var ownerIds = [];
+    var i;
+    for (i = 0; i < projects.length; i++) {
+      if (projects[i].owner_id) ownerIds.push(projects[i].owner_id);
+    }
+    var ownerNames = {};
+    if (ownerIds.length) {
+      var opRes = await sb.from("profiles").select("id, display_name").in("id", ownerIds);
+      (opRes.data || []).forEach(function (r) {
+        ownerNames[r.id] = r.display_name || "";
+      });
+    }
+    var membersByPid = {};
+    if (projectIds.length) {
+      var allPmRes = await sb
+        .from("project_members")
+        .select("project_id, user_id, profiles(display_name)")
+        .in("project_id", projectIds);
+      (allPmRes.data || []).forEach(function (m) {
+        var pidx = m.project_id;
+        if (!membersByPid[pidx]) membersByPid[pidx] = [];
+        membersByPid[pidx].push(m);
+      });
+    }
+    var stateProjects = [];
+    for (i = 0; i < projects.length; i++) {
+      var row = projects[i];
+      projectOwnerIds[row.id] = row.owner_id;
+      var pmRes = { data: membersByPid[row.id] || [] };
+      var memberNames = [];
+      var seen = {};
+      (pmRes.data || []).forEach(function (m) {
+        var nm = m.profiles && m.profiles.display_name ? m.profiles.display_name : "";
+        if (nm && !seen[nm]) {
+          seen[nm] = true;
+          memberNames.push(nm);
+        }
+      });
+      var ownerName = ownerNames[row.owner_id] || "";
+      if (row.extra && row.extra.members && Array.isArray(row.extra.members)) {
+        for (var mi = 0; mi < row.extra.members.length; mi++) {
+          var mm = String(row.extra.members[mi] || "").trim();
+          if (mm && !seen[mm]) {
+            seen[mm] = true;
+            memberNames.push(mm);
+          }
+        }
+      }
+      if (row.extra && row.extra.owner) ownerName = row.extra.owner || ownerName;
+      var proj = {
+        id: row.id,
+        name: row.name,
+        archived: row.archived,
+        createdAt: row.created_at,
+        owner: ownerName,
+        members: memberNames.length ? memberNames : [ownerName || displayName],
+        pipelineStages: row.pipeline_stages && row.pipeline_stages.length ? row.pipeline_stages : ["流程"],
+        chainMode: !!row.chain_mode,
+      };
+      if (row.extra && typeof row.extra === "object") {
+        for (var exk in row.extra) {
+          if (exk === "members" || exk === "owner") continue;
+          proj[exk] = row.extra[exk];
+        }
+      }
+      stateProjects.push(proj);
+    }
+    var tasksRes = await sb.from("tasks").select("*").in("project_id", projectIds);
+    var taskRows = tasksRes.data || [];
+    var stateTasks = taskRows.map(taskFromRow);
+    var taskIds = stateTasks.map(function (t) {
+      return t.id;
+    });
+    var rels = [];
+    var coms = [];
+    if (taskIds.length) {
+      var rSeen = {};
+      function mergeRel(r) {
+        if (!r || rSeen[r.id]) return;
+        rSeen[r.id] = true;
+        rels.push({
+          id: r.id,
+          fromId: r.from_task_id,
+          toId: r.to_task_id,
+          kind: r.kind || "related",
+        });
+      }
+      var r1 = await sb.from("task_relations").select("*").in("from_task_id", taskIds);
+      var r2 = await sb.from("task_relations").select("*").in("to_task_id", taskIds);
+      (r1.data || []).forEach(mergeRel);
+      (r2.data || []).forEach(mergeRel);
+      var cRes = await sb.from("task_comments").select("*").in("task_id", taskIds);
+      (cRes.data || []).forEach(function (c) {
+        coms.push({
+          id: c.id,
+          taskId: c.task_id,
+          author: c.author || "",
+          body: c.body || "",
+          parentId: c.parent_id || null,
+          at: c.at || null,
+          createdAt: c.created_at,
+        });
+      });
+    }
+    var out = {
+      userName: displayName || activeAccount || "用户",
+      avatar: avatar,
+      profileTitle: profileTitle,
+      profileBio: profileBio,
+      currentProjectId: stateProjects[0] ? stateProjects[0].id : "",
+      view: "dashboard",
+      workspaceTab: "flow",
+      showFlowOverlay: false,
+      scheduleWeekOffset: 0,
+      scheduleProjectFilter: "",
+      projects: stateProjects,
+      tasks: stateTasks,
+      relations: rels,
+      comments: coms,
+    };
+    migrateStateObject(out);
+    postLoadState(out);
+    fixCurrentProjectPointer(out);
+    persistSbStateCache(userId, out);
+    return out;
+  }
+
+  /** 删除「本地 state 已不存在、但仍属于当前用户 owner 的」云端项目及下属数据（仅靠 upsert 无法删项目） */
+  async function deleteOrphanOwnedProjectsFromSupabase(uid) {
+    if (!__sb || !state) return;
+    var keep = {};
+    var pi;
+    for (pi = 0; pi < state.projects.length; pi++) {
+      keep[state.projects[pi].id] = true;
+    }
+    var po = await __sb.from("projects").select("id").eq("owner_id", uid);
+    var rows = po.data || [];
+    for (var oi = 0; oi < rows.length; oi++) {
+      var oid = rows[oi].id;
+      if (keep[oid]) continue;
+      var tRes = await __sb.from("tasks").select("id").eq("project_id", oid);
+      var tids = (tRes.data || []).map(function (r) {
+        return r.id;
+      });
+      if (tids.length) {
+        await __sb.from("task_relations").delete().in("from_task_id", tids);
+        await __sb.from("task_relations").delete().in("to_task_id", tids);
+        await __sb.from("task_comments").delete().in("task_id", tids);
+        await __sb.from("tasks").delete().in("id", tids);
+      }
+      await __sb.from("project_members").delete().eq("project_id", oid);
+      await __sb.from("projects").delete().eq("id", oid);
+      try {
+        delete projectOwnerIds[oid];
+      } catch (eO) {}
+    }
+  }
+
+  async function flushSaveToSupabase() {
+    if (!useSupabaseMode() || !__sb || !state) return;
+    try {
+      var ures = await __sb.auth.getUser();
+      var uid = ures.data.user && ures.data.user.id;
+      if (!uid) return;
+      if (__sbOrphanPurgeNeeded) {
+        await deleteOrphanOwnedProjectsFromSupabase(uid);
+        __sbOrphanPurgeNeeded = false;
+      }
+      await __sb.from("profiles").upsert({
+        id: uid,
+        display_name: state.userName || "",
+        avatar: state.avatar || "👤",
+        profile_title: state.profileTitle || "",
+        profile_bio: state.profileBio || "",
+        updated_at: new Date().toISOString(),
+      });
+      var pi;
+      for (pi = 0; pi < state.projects.length; pi++) {
+        var p = state.projects[pi];
+        var ownerId = projectOwnerIds[p.id] || uid;
+        var extra = projectExtraFromProj(p);
+        extra.members = p.members || [];
+        extra.owner = p.owner || "";
+        await __sb.from("projects").upsert({
+          id: p.id,
+          owner_id: ownerId,
+          name: p.name,
+          archived: !!p.archived,
+          created_at: p.createdAt || new Date().toISOString(),
+          pipeline_stages: p.pipelineStages || [],
+          chain_mode: !!p.chainMode,
+          extra: extra,
+        });
+        projectOwnerIds[p.id] = ownerId;
+        var role = ownerId === uid ? "owner" : "member";
+        await __sb.from("project_members").upsert(
+          { project_id: p.id, user_id: uid, role: role },
+          { onConflict: "project_id,user_id" }
+        );
+      }
+      var ti;
+      for (ti = 0; ti < state.tasks.length; ti++) {
+        await __sb.from("tasks").upsert(taskRowFromTask(state.tasks[ti]));
+      }
+      for (pi = 0; pi < state.projects.length; pi++) {
+        var pid = state.projects[pi].id;
+        var want = state.tasks
+          .filter(function (t) {
+            return t.projectId === pid;
+          })
+          .map(function (t) {
+            return t.id;
+          });
+        var existRes = await __sb.from("tasks").select("id").eq("project_id", pid);
+        var ej = existRes.data || [];
+        for (var ei = 0; ei < ej.length; ei++) {
+          if (want.indexOf(ej[ei].id) === -1) {
+            await __sb.from("tasks").delete().eq("id", ej[ei].id);
+          }
+        }
+      }
+      var tids = state.tasks.map(function (t) {
+        return t.id;
+      });
+      if (tids.length) {
+        await __sb.from("task_relations").delete().in("from_task_id", tids);
+        await __sb.from("task_relations").delete().in("to_task_id", tids);
+        await __sb.from("task_comments").delete().in("task_id", tids);
+      }
+      for (var ri = 0; ri < state.relations.length; ri++) {
+        var rr = state.relations[ri];
+        if (tids.indexOf(rr.fromId) === -1 || tids.indexOf(rr.toId) === -1) continue;
+        await __sb.from("task_relations").upsert({
+          id: rr.id,
+          from_task_id: rr.fromId,
+          to_task_id: rr.toId,
+          kind: rr.kind || "related",
+        });
+      }
+      for (var ci = 0; ci < state.comments.length; ci++) {
+        var cc = state.comments[ci];
+        if (tids.indexOf(cc.taskId) === -1) continue;
+        await __sb.from("task_comments").upsert({
+          id: cc.id,
+          task_id: cc.taskId,
+          author: cc.author || "",
+          body: cc.body || "",
+          parent_id: cc.parentId || null,
+          at: cc.at || null,
+          created_at: cc.createdAt || new Date().toISOString(),
+        });
+      }
+      persistSbStateCache(uid, state);
+    } catch (e) {
+      console.error("Supabase save failed", e);
+    }
+  }
+
+  function scheduleSupabaseFlush() {
+    if (!useSupabaseMode() || !__sb || !activeAccount || !state) return;
+    if (__applyingRemoteSupabase) return;
+    if (__sbSaveTimer) clearTimeout(__sbSaveTimer);
+    __sbSaveTimer = setTimeout(function () {
+      __sbSaveTimer = null;
+      flushSaveToSupabase();
+    }, 450);
+  }
+
+  function disconnectSupabaseRealtime() {
+    if (__sbChannel && __sb) {
+      try {
+        __sb.removeChannel(__sbChannel);
+      } catch (e) {}
+      __sbChannel = null;
+    }
+  }
+
+  function connectSupabaseRealtime() {
+    if (!useSupabaseMode() || !__sb || !state) return;
+    disconnectSupabaseRealtime();
+    __sbChannel = __sb
+      .channel("workspace:" + String(activeAccount || "anon"))
+      .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, function () {
+        scheduleSupabaseReload();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "projects" }, function () {
+        scheduleSupabaseReload();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "project_members" }, function () {
+        scheduleSupabaseReload();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "task_relations" }, function () {
+        scheduleSupabaseReload();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "task_comments" }, function () {
+        scheduleSupabaseReload();
+      })
+      .subscribe();
+  }
+
+  function scheduleSupabaseReload() {
+    if (__applyingRemoteSupabase) return;
+    if (__sbReloadTimer) clearTimeout(__sbReloadTimer);
+    __sbReloadTimer = setTimeout(function () {
+      __sbReloadTimer = null;
+      if (!__sb || !activeAccount) return;
+      __sb.auth.getUser().then(function (res) {
+        var u = res.data.user;
+        if (!u) return;
+        __applyingRemoteSupabase = true;
+        return loadStateFromSupabase(u.id)
+          .then(function (s) {
+            if (s) {
+              state = s;
+              migrateStateObject(state);
+              postLoadState(state);
+              fixCurrentProjectPointer(state);
+              syncSavedSnapshotFromState(state);
+              render();
+            }
+          })
+          .finally(function () {
+            __applyingRemoteSupabase = false;
+          });
+      });
+    }, 400);
+  }
+
+  async function redeemInviteIfPresent() {
+    try {
+      var q = String(window.location.search || "");
+      var m = /[?&]invite=([^&]+)/.exec(q);
+      if (!m) return;
+      var token = decodeURIComponent(m[1]);
+      if (!token || !__sb) return;
+      await __sb.rpc("redeem_project_invite", { invite_token: token });
+      var url = window.location.pathname + window.location.hash;
+      window.history.replaceState({}, "", url);
+    } catch (e) {
+      console.warn("redeem invite", e);
+    }
+  }
+
+  async function applySupabaseUser(user) {
+    activeAccount = user.email || user.id;
+    setSession(activeAccount);
+    var cached = readSbStateCache(user.id);
+    var cacheOk =
+      cached &&
+      ((cached.projects && cached.projects.length) || (cached.tasks && cached.tasks.length));
+    if (cacheOk) {
+      state = migrateStateObject(JSON.parse(JSON.stringify(cached)));
+      postLoadState(state);
+      fixCurrentProjectPointer(state);
+      syncSavedSnapshotFromState(state);
+      applyRouteFromHash();
+      connectSupabaseRealtime();
+      render();
+    }
+    state = await loadStateFromSupabase(user.id);
+    if (
+      state &&
+      (!state.projects || !state.projects.length) &&
+      (!state.tasks || !state.tasks.length)
+    ) {
+      var c = readSbStateCache(user.id);
+      if (c && c.projects && c.projects.length) {
+        state = migrateStateObject(JSON.parse(JSON.stringify(c)));
+        postLoadState(state);
+        fixCurrentProjectPointer(state);
+        scheduleSupabaseFlush();
+      }
+    }
+    syncSavedSnapshotFromState(state);
+    applyRouteFromHash();
+    connectSupabaseRealtime();
+    if (cacheOk) {
+      render();
+    }
+  }
+
+  async function bootstrapSupabase() {
+    __bootstrapError = "";
+    var el = document.getElementById("app");
+    if (el) {
+      el.innerHTML =
+        '<div style="padding:2.5rem 1rem;text-align:center;color:#64748b;font-size:14px">正在连接协作服务…</div>';
+    }
+    try {
+      await ensureSupabaseClient();
+      var session = await resolveSupabaseSession();
+      if (session && session.user) {
+        await redeemInviteIfPresent();
+        await applySupabaseUser(session.user);
+      } else {
+        activeAccount = null;
+        state = null;
+      }
+      render();
+    } catch (e) {
+      __bootstrapError = "协作服务不可用：" + (e && e.message ? e.message : String(e));
+      activeAccount = null;
+      state = null;
+      render();
+    }
+  }
+
+  function isValidEmail(s) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(s || "").trim());
   }
 
   function isPrivateLanHostname(h) {
@@ -918,11 +1611,16 @@
 
   function renderWelcomeBanner() {
     if (!activeAccount || isWelcomeBannerDismissed()) return "";
+    var hintLocal =
+      '<p class="muted" style="margin:0.25rem 0 0;font-size:12px">数据只在当前浏览器，换电脑需自行导出或分享码。</p>';
+    var hintCloud =
+      '<p class="muted" style="margin:0.25rem 0 0;font-size:12px">数据在 Supabase 云端，换设备登录同一邮箱即可同步。</p>';
     return (
       '<div class="welcome-banner card" id="welcome-banner">' +
       '<div class="wb-head">' +
       "<div><strong>第一次使用？按下面四步即可上手</strong>" +
-      '<p class="muted" style="margin:0.25rem 0 0;font-size:12px">数据只在当前浏览器，换电脑需自行导出或分享码。</p></div>' +
+      (useSupabaseMode() ? hintCloud : hintLocal) +
+      "</div>" +
       '<button type="button" class="btn btn-sm" id="welcome-dismiss" title="关闭后仍可在侧栏从「恢复示例」体验演示">知道了，收起</button>' +
       "</div>" +
       "<ol class=\"welcome-steps\">" +
@@ -1135,7 +1833,10 @@
           id: "c1", taskId: "t_p1_root", author: "叙事导演", body: "请 @" + pm + " 确认反派台词冻结版，口型才能锁。",
           parentId: null, at: [pm], createdAt: new Date().toISOString()
         }
-      ]
+      ],
+      personProfiles: {},
+      siteChat: { global: [], threads: {} },
+      chatUi: { open: false, tab: "global", peer: "" }
     };
   }
 
@@ -1155,6 +1856,9 @@
       tasks: [],
       relations: [],
       comments: [],
+      personProfiles: {},
+      siteChat: { global: [], threads: {} },
+      chatUi: { open: false, tab: "global", peer: "" },
     };
   }
 
@@ -1215,6 +1919,11 @@
     if (o.avatar === undefined) o.avatar = "👤";
     if (o.profileTitle === undefined) o.profileTitle = "";
     if (o.profileBio === undefined) o.profileBio = "";
+    if (!o.personProfiles || typeof o.personProfiles !== "object") o.personProfiles = {};
+    if (!o.siteChat || typeof o.siteChat !== "object") o.siteChat = { global: [], threads: {} };
+    if (!Array.isArray(o.siteChat.global)) o.siteChat.global = [];
+    if (!o.siteChat.threads || typeof o.siteChat.threads !== "object") o.siteChat.threads = {};
+    if (!o.chatUi || typeof o.chatUi !== "object") o.chatUi = { open: false, tab: "global", peer: "" };
     if (o.projects && o.projects.length) {
       for (var pi = 0; pi < o.projects.length; pi++) {
         var op = o.projects[pi];
@@ -1647,6 +2356,12 @@
       return;
     }
     if (json === __lastSavedStateJson) return;
+    if (useSupabaseMode()) {
+      __lastSavedStateJson = json;
+      if (__applyingRemoteSupabase) return;
+      scheduleSupabaseFlush();
+      return;
+    }
     try {
       localStorage.setItem(storageKeyForUser(activeAccount), json);
     } catch (e2) {}
@@ -1712,6 +2427,7 @@
 
   /** 本机多账号协作：按任务负责人/协作人（账号ID）自动把项目镜像到对方账号 */
   function syncCrossAccountProjectShares() {
+    if (useSupabaseMode()) return;
     if (!activeAccount || !state) return;
     var auth = loadAuth();
     var users = auth.accounts.map(function (a) { return a.username; });
@@ -2239,7 +2955,18 @@
         __socket.emit("unsubscribe_project", pid);
       } catch (e) {}
     }
+    delete projectOwnerIds[pid];
+    if (useSupabaseMode() && __sb) {
+      __sbOrphanPurgeNeeded = true;
+    }
     save(state);
+    if (useSupabaseMode() && __sb) {
+      if (__sbSaveTimer) {
+        clearTimeout(__sbSaveTimer);
+        __sbSaveTimer = null;
+      }
+      flushSaveToSupabase();
+    }
     return true;
   }
 
@@ -2573,6 +3300,78 @@
     );
   }
 
+  function dmThreadKey(a, b) {
+    var x = String(a || "").trim();
+    var y = String(b || "").trim();
+    if (!x || !y) return "";
+    if (x === y) return x + "\n__self\n";
+    return x < y ? x + "\n|\n" + y : y + "\n|\n" + x;
+  }
+
+  function getPersonProfile(displayName) {
+    var k = String(displayName || "").trim();
+    if (!state.personProfiles) state.personProfiles = {};
+    if (!k) {
+      return { department: "", username: "", phone: "", email: "", avatarUrl: "", note: "" };
+    }
+    if (!state.personProfiles[k]) state.personProfiles[k] = {};
+    var p = state.personProfiles[k];
+    return {
+      department: p.department != null ? String(p.department) : "",
+      username: p.username != null ? String(p.username) : k,
+      phone: p.phone != null ? String(p.phone) : "",
+      email: p.email != null ? String(p.email) : "",
+      avatarUrl: p.avatarUrl != null ? String(p.avatarUrl) : "",
+      note: p.note != null ? String(p.note) : "",
+    };
+  }
+
+  function flowPersonChipHtml(displayName, roleLabel) {
+    var k = String(displayName || "").trim();
+    if (!k) return "";
+    var prof = getPersonProfile(k);
+    var avRaw = prof.avatarUrl || initialsOf(k);
+    var avInner = isAvatarUrl(avRaw)
+      ? '<img src="' + esc(avRaw) + '" alt="" />'
+      : '<span class="flow-av-text">' + esc(String(avRaw).slice(0, 2)) + "</span>";
+    return (
+      '<span class="flow-person-chip" data-person-profile="' +
+      esc(k) +
+      '" title="' +
+      esc(roleLabel + "：" + k) +
+      ' · 点击查看资料/发消息">' +
+      '<span class="flow-av">' +
+      avInner +
+      "</span>" +
+      '<span class="flow-person-name">' +
+      esc(k) +
+      "</span></span>"
+    );
+  }
+
+  function renderFlowPeopleRowHtml(t) {
+    var parts = [];
+    var asg = String(t.assignee || "").trim();
+    if (asg) parts.push(flowPersonChipHtml(asg, "负责人"));
+    var cols = parseCommaMembers(t.collaborators || "");
+    for (var ci = 0; ci < cols.length; ci++) {
+      parts.push(flowPersonChipHtml(cols[ci], "协作"));
+    }
+    if (!parts.length) {
+      return '<div class="fn-people muted" style="font-size:11px">未指定负责人 / 协作人</div>';
+    }
+    return '<div class="fn-people">' + parts.join("") + "</div>";
+  }
+
+  function taskDiscussionCount(taskId) {
+    if (!state.comments || !taskId) return 0;
+    var n = 0;
+    for (var i = 0; i < state.comments.length; i++) {
+      if (state.comments[i].taskId === taskId) n++;
+    }
+    return n;
+  }
+
   function renderFlowNode(proj, t, depth, chainCtx, pipelineCtx, opts) {
     opts = opts || {};
     depth = depth || 0;
@@ -2585,6 +3384,18 @@
     var colAttr =
       pipelineCtx && !isChainProject(proj)
         ? ' data-flow-column-stage="' + esc(String(pipelineCtx.taskStage)) + '"'
+        : "";
+    var discN = taskDiscussionCount(t.id);
+    var discHint =
+      discN > 0
+        ? '<div class="fn-disc">讨论区 · ' + discN + " 条</div>"
+        : '<div class="fn-disc muted">讨论区 · 暂无</div>';
+    var descHint =
+      t.description && String(t.description).trim()
+        ? '<div class="fn-meta" style="margin-top:0.25rem">' +
+          esc(String(t.description).slice(0, 48)) +
+          (String(t.description).length > 48 ? "…" : "") +
+          "</div>"
         : "";
     return (
       '<div class="flow-node ' +
@@ -2601,18 +3412,22 @@
       "</div>" +
       '<div class="' +
       flowDdlStripClass(t) +
-      '" title="时间要求">' +
+      '" title="完成截止时间">' +
       esc(flowDdlStripLabel(t)) +
       "</div>" +
-      '<div class="fn-meta">' +
+      '<div class="fn-status-row">' +
+      '<span class="' +
+      badgeClass(t.status) +
+      '">' +
       esc(stLabel) +
-  (t.assignee ? " · " + esc(t.assignee) : "") +
-      (depBlockers.length && t.status !== "done" ? " · 依赖阻塞(" + depBlockers.length + ")" : "") +
-      (t.deadline ? " · 截止 " + esc(String(t.deadline).slice(0, 10)) : "") +
-      (t.description && String(t.description).trim()
-        ? " · " + esc(String(t.description).slice(0, 22)) + (String(t.description).length > 22 ? "…" : "")
+      "</span>" +
+      (depBlockers.length && t.status !== "done"
+        ? '<span class="fn-dep">依赖阻塞 ' + depBlockers.length + "</span>"
         : "") +
       "</div>" +
+      renderFlowPeopleRowHtml(t) +
+      discHint +
+      descHint +
       renderFlowNodeActionsHtml(proj, t) +
       "</div>"
     );
@@ -2830,6 +3645,10 @@
 
   function bootstrap() {
     __bootstrapError = "";
+    if (useSupabaseMode()) {
+      bootstrapSupabase();
+      return;
+    }
     var el = document.getElementById("app");
     if (useServerStorage() && el) {
       el.innerHTML =
@@ -4416,9 +5235,12 @@
   }
 
   function renderAuthScreen() {
-    var storeHint = useServerStorage()
+    var storeHint = useSupabaseMode()
+      ? '<p class="muted" style="margin:0 0 1rem;font-size:13px">当前为<strong>Supabase 协作模式</strong>：请使用<strong>邮箱</strong>注册/登录；数据存储在 Supabase，多设备与项目成员实时同步（需在控制台启用 Realtime）。</p>'
+      : useServerStorage()
       ? '<p class="muted" style="margin:0 0 1rem;font-size:13px">当前为<strong>在线模式</strong>：账号与任务数据保存在<strong>服务器</strong>，多人可同时访问本站，各自使用独立账号登录。</p>'
       : '<p class="muted" style="margin:0 0 1rem;font-size:13px">登录或注册后，任务与项目数据按<strong>账号</strong>存在本机浏览器（localStorage）。密码经 SHA-256 哈希后仅存本地，无远程服务器验证。</p>';
+    var userLabel = useSupabaseMode() ? "邮箱" : "用户名";
     var bootErr =
       __bootstrapError &&
       '<div class="notice" style="margin-bottom:0.75rem">' + esc(__bootstrapError) + "</div>";
@@ -4432,7 +5254,11 @@
       "<li>默认进「工作台」看概览；进「项目」打开任务流程，点方块编辑</li>" +
       "<li>「日程」看本周截止；「工作台」看分配给你的事</li>" +
       "<li>" +
-      (useServerStorage() ? "在线模式下数据在服务器；也可直接打开本地 html 文件使用本机存储。" : "数据仅存本机；可「恢复示例」体验演示") +
+      (useSupabaseMode()
+        ? "需通过 http(s) 访问本页以加载协作 SDK；数据在 Supabase。"
+        : useServerStorage()
+        ? "在线模式下数据在服务器；也可直接打开本地 html 文件使用本机存储。"
+        : "数据仅存本机；可「恢复示例」体验演示") +
       "</li></ul>" +
       storeHint +
       '<div class="auth-tabs">' +
@@ -4441,7 +5267,11 @@
       "</div>" +
       '<div id="auth-msg" class="auth-msg"></div>' +
       '<div id="auth-panel-in">' +
-      '<div class="row"><label>用户名</label><input class="input" id="auth-in-user" autocomplete="username" /></div>' +
+      '<div class="row"><label>' +
+      userLabel +
+      '</label><input class="input" id="auth-in-user" autocomplete="username" placeholder="' +
+      (useSupabaseMode() ? "you@example.com" : "") +
+      '" /></div>' +
       '<div class="row"><label>密码</label><input type="password" class="input" id="auth-in-pass" autocomplete="current-password" /></div>' +
       '<div class="flex" style="margin-top:0.75rem;justify-content:flex-end">' +
       '<button type="button" class="btn btn-primary" id="auth-btn-in">登录</button></div>' +
@@ -4453,7 +5283,11 @@
       esc(DEMO_AUTH_PASS) +
       "</span></div></div>" +
       '<div id="auth-panel-up" class="hidden">' +
-      '<div class="row"><label>用户名</label><input class="input" id="auth-up-user" autocomplete="username" /></div>' +
+      '<div class="row"><label>' +
+      userLabel +
+      '</label><input class="input" id="auth-up-user" autocomplete="username" placeholder="' +
+      (useSupabaseMode() ? "you@example.com" : "") +
+      '" /></div>' +
       '<div class="row"><label>密码</label><input type="password" class="input" id="auth-up-pass" autocomplete="new-password" /></div>' +
       '<div class="row"><label>确认密码</label><input type="password" class="input" id="auth-up-pass2" autocomplete="new-password" /></div>' +
       '<div class="flex" style="margin-top:0.75rem;justify-content:flex-end">' +
@@ -4494,6 +5328,39 @@
         u = u.trim();
         var pw = (document.getElementById("auth-in-pass") && document.getElementById("auth-in-pass").value) || "";
         setMsg("");
+        if (useSupabaseMode()) {
+          if (!isValidEmail(u)) {
+            setMsg("请输入有效邮箱");
+            return;
+          }
+          if (pw.length < 6) {
+            setMsg("密码至少 6 位");
+            return;
+          }
+          setMsg("正在登录…");
+          ensureSupabaseClient()
+            .then(function () {
+              return __sb.auth.signInWithPassword({ email: u, password: pw });
+            })
+            .then(function (res) {
+              if (!res || res.error) {
+                setMsg((res && res.error && res.error.message) || "登录失败");
+                return null;
+              }
+              return __sb.auth.getUser();
+            })
+            .then(function (ur) {
+              if (!ur || !ur.data || !ur.data.user) return;
+              return applySupabaseUser(ur.data.user);
+            })
+            .then(function () {
+              if (activeAccount && state) render();
+            })
+            .catch(function (e) {
+              setMsg((e && e.message) || "登录失败");
+            });
+          return;
+        }
         if (u.length < 2) {
           setMsg("用户名至少 2 个字符");
           return;
@@ -4565,6 +5432,10 @@
     var btnDemo = document.getElementById("auth-btn-demo");
     if (btnDemo) {
       btnDemo.onclick = function () {
+        if (useSupabaseMode()) {
+          setMsg("Supabase 模式请使用邮箱注册或登录，不使用本地演示账号。");
+          return;
+        }
         setMsg("正在登录演示账号…");
         if (useServerStorage()) {
           apiFetch("/api/login", { method: "POST", body: { username: DEMO_AUTH_USER, password: DEMO_AUTH_PASS } })
@@ -4672,6 +5543,47 @@
         var pw = (document.getElementById("auth-up-pass") && document.getElementById("auth-up-pass").value) || "";
         var pw2 = (document.getElementById("auth-up-pass2") && document.getElementById("auth-up-pass2").value) || "";
         setMsg("");
+        if (useSupabaseMode()) {
+          if (!isValidEmail(u)) {
+            setMsg("请输入有效邮箱");
+            return;
+          }
+          if (pw.length < 6) {
+            setMsg("密码至少 6 位");
+            return;
+          }
+          if (pw !== pw2) {
+            setMsg("两次密码不一致");
+            return;
+          }
+          setMsg("正在注册…");
+          ensureSupabaseClient()
+            .then(function () {
+              return __sb.auth.signUp({
+                email: u,
+                password: pw,
+                options: { data: { display_name: String(u).split("@")[0] || u } },
+              });
+            })
+            .then(function (res) {
+              if (!res || res.error) {
+                setMsg((res && res.error && res.error.message) || "注册失败");
+                return null;
+              }
+              if (res.data && res.data.session && res.data.user) {
+                return applySupabaseUser(res.data.user);
+              }
+              setMsg("注册成功。若项目启用了邮箱验证，请查收邮件后登录。");
+              return null;
+            })
+            .then(function () {
+              if (activeAccount && state) render();
+            })
+            .catch(function (e) {
+              setMsg((e && e.message) || "注册失败");
+            });
+          return;
+        }
         if (u.length < 2) {
           setMsg("用户名至少 2 个字符");
           return;
@@ -4741,6 +5653,195 @@
     }
   }
 
+  function renderChatDockHtml() {
+    if (!state.siteChat) state.siteChat = { global: [], threads: {} };
+    if (!state.chatUi) state.chatUi = { open: false, tab: "global", peer: "" };
+    if (!Array.isArray(state.siteChat.global)) state.siteChat.global = [];
+    if (!state.siteChat.threads) state.siteChat.threads = {};
+    var open = !!state.chatUi.open;
+    var tab = state.chatUi.tab || "global";
+    var peer = state.chatUi.peer || "";
+    var msgs = [];
+    if (tab === "global") {
+      msgs = state.siteChat.global;
+    } else if (peer) {
+      var k = dmThreadKey(state.userName, peer);
+      msgs = state.siteChat.threads[k] || [];
+    }
+    var msgHtml = "";
+    for (var mi = 0; mi < msgs.length; mi++) {
+      var m = msgs[mi];
+      var tmt = m.createdAt ? esc(String(m.createdAt).slice(0, 16).replace("T", " ")) : "";
+      msgHtml +=
+        '<div class="wg-msg"><div><span class="wg-msg-from">' +
+        esc(m.from) +
+        '</span><span class="wg-msg-time">' +
+        tmt +
+        "</span></div><div>" +
+        esc(m.body) +
+        "</div></div>";
+    }
+    if (!msgHtml) msgHtml = '<p class="muted" style="margin:0;font-size:12px">暂无消息，发送一条开始协作吧</p>';
+    var panelClass = "wg-chat-panel" + (open ? "" : " hidden");
+    var ph =
+      tab === "direct" && !peer ? "请先点击流程图中成员头像，再在此私聊" : "输入消息，Enter 发送";
+    return (
+      '<button type="button" class="wg-chat-fab" id="wg-chat-fab" title="站内消息">💬 消息</button>' +
+      '<div class="' +
+      panelClass +
+      '" id="wg-chat-panel">' +
+      '<div class="wg-chat-head">' +
+      '<button type="button" class="' +
+      (tab === "global" ? "wg-tab-active " : "") +
+      'wg-tab-chat" data-wg-chat-tab="global">全员</button>' +
+      '<button type="button" class="' +
+      (tab === "direct" ? "wg-tab-active " : "") +
+      'wg-tab-chat" data-wg-chat-tab="direct">私聊' +
+      (peer ? " · " + esc(peer) : "") +
+      "</button>" +
+      '<button type="button" id="wg-chat-close" style="margin-left:auto;font-size:11px;border:none;background:transparent;cursor:pointer;color:#64748b">✕</button></div>' +
+      '<div class="wg-chat-messages" id="wg-chat-messages">' +
+      msgHtml +
+      "</div>" +
+      '<div class="wg-chat-input-row">' +
+      '<input type="text" id="wg-chat-input" placeholder="' +
+      esc(ph) +
+      '" />' +
+      '<button type="button" class="btn btn-primary btn-sm" id="wg-chat-send">发送</button></div></div>'
+    );
+  }
+
+  function bindChatDock() {
+    var fab = document.getElementById("wg-chat-fab");
+    var closeBtn = document.getElementById("wg-chat-close");
+    if (fab) {
+      fab.onclick = function () {
+        state.chatUi.open = !state.chatUi.open;
+        save(state);
+        render();
+      };
+    }
+    if (closeBtn) {
+      closeBtn.onclick = function () {
+        state.chatUi.open = false;
+        save(state);
+        render();
+      };
+    }
+    var tabs = document.querySelectorAll("[data-wg-chat-tab]");
+    for (var ti = 0; ti < tabs.length; ti++) {
+      tabs[ti].onclick = function () {
+        var t = this.getAttribute("data-wg-chat-tab");
+        state.chatUi.tab = t;
+        if (t === "global") state.chatUi.peer = "";
+        save(state);
+        render();
+      };
+    }
+    function sendChatMsg() {
+      var inp = document.getElementById("wg-chat-input");
+      var body = (inp && inp.value) || "";
+      if (!body.trim()) return;
+      if (!state.siteChat) state.siteChat = { global: [], threads: {} };
+      if (!state.siteChat.global) state.siteChat.global = [];
+      if (!state.siteChat.threads) state.siteChat.threads = {};
+      var entry = {};
+      entry.id = uid();
+      entry.from = state.userName;
+      entry.body = body.trim();
+      entry.createdAt = new Date().toISOString();
+      if (state.chatUi.tab === "global") {
+        state.siteChat.global.push(entry);
+      } else {
+        var peer = state.chatUi.peer;
+        if (!peer) {
+          alert("请先点击流程图或任务详情中的成员头像，在资料卡中点「发私信」。");
+          return;
+        }
+        var dk = dmThreadKey(state.userName, peer);
+        if (!state.siteChat.threads[dk]) state.siteChat.threads[dk] = [];
+        state.siteChat.threads[dk].push(entry);
+      }
+      if (inp) inp.value = "";
+      save(state);
+      render();
+    }
+    var send = document.getElementById("wg-chat-send");
+    if (send) send.onclick = sendChatMsg;
+    var inpEl = document.getElementById("wg-chat-input");
+    if (inpEl) {
+      inpEl.onkeydown = function (ev) {
+        if (ev.key === "Enter") sendChatMsg();
+      };
+    }
+  }
+
+  function openPersonProfileModal(displayName) {
+    var k = String(displayName || "").trim();
+    if (!k) return;
+    if (!state.personProfiles) state.personProfiles = {};
+    if (!state.personProfiles[k]) state.personProfiles[k] = {};
+    var p = getPersonProfile(k);
+    openModal(
+      "<h3>成员资料</h3>" +
+        '<p class="muted" style="font-size:12px;margin:0 0 0.45rem">点击头像可查看资料；信息仅保存在本机浏览器。</p>' +
+        '<div class="row"><label>姓名</label><input class="input" id="pp-name" value="' +
+        esc(k) +
+        '" readonly /></div>' +
+        '<div class="row"><label>部门</label><input class="input" id="pp-dept" placeholder="部门" value="' +
+        esc(p.department) +
+        '" /></div>' +
+        '<div class="row"><label>用户名</label><input class="input" id="pp-user" placeholder="登录名 / 昵称" value="' +
+        esc(p.username) +
+        '" /></div>' +
+        '<div class="row"><label>联系方式</label><input class="input" id="pp-phone" placeholder="手机 / 企微" value="' +
+        esc(p.phone) +
+        '" /></div>' +
+        '<div class="row"><label>邮箱</label><input class="input" id="pp-email" type="email" placeholder="email" value="' +
+        esc(p.email) +
+        '" /></div>' +
+        '<div class="row"><label>头像 URL</label><input class="input" id="pp-avatar" placeholder="https://… 或留空显示首字" value="' +
+        esc(p.avatarUrl) +
+        '" /></div>' +
+        '<div class="row"><label>备注</label><textarea class="input" id="pp-note" style="min-height:56px" placeholder="备注">' +
+        esc(p.note) +
+        "</textarea></div>" +
+        '<div class="flex" style="margin-top:0.5rem;gap:0.35rem;flex-wrap:wrap">' +
+        '<button type="button" class="btn btn-primary" id="pp-save">保存</button>' +
+        '<button type="button" class="btn" id="pp-msg">发私信</button>' +
+        '<button type="button" class="btn" id="pp-close">关闭</button></div>'
+    );
+    document.getElementById("pp-close").onclick = closeModal;
+    document.getElementById("pp-save").onclick = function () {
+      state.personProfiles[k] = {
+        department: (document.getElementById("pp-dept") && document.getElementById("pp-dept").value) || "",
+        username: (document.getElementById("pp-user") && document.getElementById("pp-user").value) || k,
+        phone: (document.getElementById("pp-phone") && document.getElementById("pp-phone").value) || "",
+        email: (document.getElementById("pp-email") && document.getElementById("pp-email").value) || "",
+        note: (document.getElementById("pp-note") && document.getElementById("pp-note").value) || "",
+        avatarUrl: (document.getElementById("pp-avatar") && document.getElementById("pp-avatar").value) || "",
+      };
+      save(state);
+      closeModal();
+      render();
+    };
+    document.getElementById("pp-msg").onclick = function () {
+      state.personProfiles[k] = state.personProfiles[k] || {};
+      state.personProfiles[k].department = (document.getElementById("pp-dept") && document.getElementById("pp-dept").value) || "";
+      state.personProfiles[k].username = (document.getElementById("pp-user") && document.getElementById("pp-user").value) || k;
+      state.personProfiles[k].phone = (document.getElementById("pp-phone") && document.getElementById("pp-phone").value) || "";
+      state.personProfiles[k].email = (document.getElementById("pp-email") && document.getElementById("pp-email").value) || "";
+      state.personProfiles[k].avatarUrl = (document.getElementById("pp-avatar") && document.getElementById("pp-avatar").value) || "";
+      state.personProfiles[k].note = (document.getElementById("pp-note") && document.getElementById("pp-note").value) || "";
+      state.chatUi.open = true;
+      state.chatUi.tab = "direct";
+      state.chatUi.peer = k;
+      save(state);
+      closeModal();
+      render();
+    };
+  }
+
   function render() {
     if (!activeAccount || !state) {
       appEl.innerHTML = renderAuthScreen();
@@ -4789,12 +5890,14 @@
       renderWelcomeBanner() +
       renderMain(proj) +
       "</main></div>" +
-      overlayHtml;
+      overlayHtml +
+      renderChatDockHtml();
 
     appEl.innerHTML = html;
     bindNav();
     bindWelcomeBanner();
     bindGlobalActions();
+    bindChatDock();
     if (state.view === "projects" && proj) bindWorkspace(proj);
     if (state.view === "dashboard") {
       bindDashboard();
@@ -6080,6 +7183,57 @@
           __rtPushTimer = null;
         }
         if (state) save(state);
+        if (useSupabaseMode()) {
+          if (__sbSaveTimer) {
+            clearTimeout(__sbSaveTimer);
+            __sbSaveTimer = null;
+          }
+          disconnectSupabaseRealtime();
+          var p = flushSaveToSupabase();
+          function finishSupabaseLogout() {
+            if (__sb) {
+              __sb.auth
+                .getSession()
+                .then(function (r) {
+                  var u = r.data.session && r.data.session.user && r.data.session.user.id;
+                  if (u) clearSbStateCache(u);
+                })
+                .catch(function () {})
+                .finally(function () {
+                  __sb.auth.signOut().catch(function () {});
+                  clearSession();
+                  clearWorkgraphBearer();
+                  activeAccount = null;
+                  state = null;
+                  syncSavedSnapshotFromState(null);
+                  __hashLock = true;
+                  location.hash = "";
+                  setTimeout(function () {
+                    __hashLock = false;
+                  }, 0);
+                  render();
+                });
+            } else {
+              clearSession();
+              clearWorkgraphBearer();
+              activeAccount = null;
+              state = null;
+              syncSavedSnapshotFromState(null);
+              __hashLock = true;
+              location.hash = "";
+              setTimeout(function () {
+                __hashLock = false;
+              }, 0);
+              render();
+            }
+          }
+          if (p && typeof p.then === "function") {
+            p.catch(function () {}).finally(finishSupabaseLogout);
+          } else {
+            finishSupabaseLogout();
+          }
+          return;
+        }
         if (useServerStorage()) {
           if (__serverSaveTimer) {
             clearTimeout(__serverSaveTimer);
@@ -7003,6 +8157,14 @@
       function (e) {
         var tgt = e.target;
         if (!tgt || !tgt.closest) return;
+        var personChip = tgt.closest("[data-person-profile]");
+        if (personChip && appEl.contains(personChip)) {
+          e.stopPropagation();
+          e.preventDefault();
+          var pn = personChip.getAttribute("data-person-profile");
+          if (pn) openPersonProfileModal(pn);
+          return;
+        }
         var actBtn = tgt.closest(".flow-node-act[data-flow-act][data-task-id]");
         if (actBtn && appEl.contains(actBtn)) {
           e.stopPropagation();
@@ -7324,9 +8486,16 @@
     var chtml = "";
     for (var i = 0; i < coms.length; i++) {
       var c = coms[i];
+      var ct = c.createdAt ? esc(String(c.createdAt).slice(0, 16).replace("T", " ")) : "";
       chtml +=
-        '<div class="card" style="padding:0.45rem 0.55rem;margin-bottom:0.35rem;font-size:12px">' +
-        "<strong>" + esc(c.author) + "</strong> · " + esc(c.body) + "</div>";
+        '<div class="card" style="padding:0.45rem 0.55rem;margin-bottom:0.35rem;font-size:12px;line-height:1.45">' +
+        "<strong>" +
+        esc(c.author) +
+        "</strong>" +
+        (ct ? '<span class="muted" style="font-size:10px;margin-left:0.35rem">' + ct + "</span>" : "") +
+        "<div style=\"margin-top:0.25rem\">" +
+        esc(c.body) +
+        "</div></div>";
     }
     var stageRowLabel = projForTask && isChainProject(projForTask) ? "串联顺序" : "任务顺序";
     var insSibLabel = projForTask && isChainProject(projForTask) && !t.parentId ? "下方插入" : "插入并列";
@@ -7347,8 +8516,22 @@
         "</div></div>" +
         '<div class="row"><label>状态</label><span class="' + badgeClass(t.status) + '">' + esc(STATUS_LABEL[t.status] || t.status) + "</span></div>" +
         '<div class="row"><label>优先级</label><span class="' + prioClass(t.priority) + '">' + esc(t.priority) + "</span></div>" +
-        '<div class="row"><label>负责人</label><div>' + esc(t.assignee || "—") + "</div></div>" +
-        '<div class="row"><label>协作人</label><div>' + esc(t.collaborators || "—") + "</div></div>" +
+        '<div class="row"><label>负责人</label><div class="fn-people">' +
+        (t.assignee
+          ? flowPersonChipHtml(String(t.assignee).trim(), "负责人")
+          : '<span class="muted">—</span>') +
+        "</div></div>" +
+        '<div class="row"><label>协作人</label><div class="fn-people" style="flex-wrap:wrap">' +
+        (function () {
+          var cols = parseCommaMembers(t.collaborators || "");
+          if (!cols.length) return '<span class="muted">—</span>';
+          var h = "";
+          for (var cx = 0; cx < cols.length; cx++) {
+            h += flowPersonChipHtml(cols[cx], "协作");
+          }
+          return h;
+        })() +
+        "</div></div>" +
         '<div class="row"><label>创建人</label><div>' + esc(t.createdBy || "—") + "</div></div>" +
         '<div class="row"><label>截止日期（DDL）</label><div>' + ddlStr + "</div></div>" +
         '<div class="row"><label>开始时间</label><div>' + startStr + "</div></div>" +
@@ -7356,9 +8539,10 @@
         '<div class="row"><label>实际工时</label><div>' + actStr + "</div></div>" +
         '<div class="row"><label>标签</label><div>' + esc(t.tags || "—") + "</div></div>" +
         '<div class="row"><label>关系</label><div class="muted" style="font-size:12px">' + (relLines.length ? esc(relLines.join("；")) : "无") + "</div></div>" +
-        "<h4 style=\"margin:0.75rem 0 0.35rem;font-size:0.9rem\">评论</h4>" +
+        "<h4 style=\"margin:0.75rem 0 0.35rem;font-size:0.9rem\">任务讨论区</h4>" +
+        '<p class="muted" style="margin:0 0 0.35rem;font-size:11px">与负责人、协作人沟通任务进展；可 @成员。</p>' +
         chtml +
-        '<input class="input" id="nv-com" placeholder="写评论，可 @用户名" style="margin-top:0.5rem" />' +
+        '<input class="input" id="nv-com" placeholder="参与讨论，可 @用户名" style="margin-top:0.5rem" />' +
         '<div class="flex" style="margin-top:0.5rem;justify-content:space-between;align-items:center">' +
         '<div class="flex" style="gap:0.35rem;flex-wrap:wrap">' +
         siblingBtn +
@@ -7367,9 +8551,20 @@
         '<div class="flex" style="gap:0.35rem">' +
         '<button type="button" class="btn" id="nv-close">关闭</button> ' +
         '<button type="button" class="btn btn-primary" id="nv-edit">编辑</button> ' +
-        '<button type="button" class="btn btn-primary" id="nv-send">发评论</button></div></div>'
+        '<button type="button" class="btn btn-primary" id="nv-send">发送到讨论区</button></div></div>'
     );
     document.getElementById("nv-close").onclick = closeModal;
+    if (modalEl) {
+      var profChips = modalEl.querySelectorAll("[data-person-profile]");
+      for (var pci = 0; pci < profChips.length; pci++) {
+        profChips[pci].onclick = function (ev) {
+          ev.stopPropagation();
+          ev.preventDefault();
+          var pn = this.getAttribute("data-person-profile");
+          if (pn) openPersonProfileModal(pn);
+        };
+      }
+    }
     var nvChild = document.getElementById("nv-child");
     if (nvChild) {
       nvChild.onclick = function () {

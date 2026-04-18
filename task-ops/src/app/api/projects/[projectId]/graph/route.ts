@@ -26,6 +26,12 @@ export async function GET(
       status: true,
       parentId: true,
       deadline: true,
+      assignee: { select: { name: true, email: true, image: true } },
+      collaborators: {
+        select: {
+          user: { select: { name: true, email: true, image: true } },
+        },
+      },
     },
   });
 
@@ -79,6 +85,11 @@ export async function GET(
       status: t.status,
       parentId: t.parentId,
       deadline: t.deadline,
+      assigneeName: t.assignee?.name ?? t.assignee?.email ?? null,
+      assigneeImage: t.assignee?.image ?? null,
+      collaboratorNames: t.collaborators
+        .map((c) => c.user.name ?? c.user.email ?? "")
+        .filter(Boolean),
     })),
     edges,
   });

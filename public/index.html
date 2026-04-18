@@ -300,8 +300,47 @@
     .flow-node.fn-sub { font-size: 11px; padding: 0.38rem 0.45rem; opacity: 0.98; }
     .flow-node:hover { border-color: #cbd5e1; box-shadow: var(--shadow-sm); }
     .flow-node.fn-chain-past:hover { border-color: #cbd5e1; }
-    .flow-node .fn-title { font-weight: 600; margin-bottom: 0.25rem; }
+    .flow-node .fn-title { font-weight: 600; margin-bottom: 0.25rem; line-height: 1.35; }
     .flow-node .fn-meta { font-size: 11px; color: var(--muted); }
+    .fn-status-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.5rem; margin-top: 0.2rem; }
+    .fn-dep { font-size: 10px; color: #b45309; }
+    .fn-people { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.45rem; align-items: center; }
+    .flow-person-chip {
+      display: inline-flex; align-items: center; gap: 0.3rem; max-width: 100%;
+      padding: 0.12rem 0.35rem 0.12rem 0.12rem; border-radius: 999px;
+      background: #f8fafc; border: 1px solid #e2e8f0; cursor: pointer; font-size: 11px;
+      transition: background 0.12s, border-color 0.12s;
+    }
+    .flow-person-chip:hover { background: #eff6ff; border-color: #93c5fd; }
+    .flow-person-chip .flow-av {
+      width: 22px; height: 22px; border-radius: 999px; overflow: hidden; flex-shrink: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, #fecaca, #fee2e2); font-size: 11px; font-weight: 700; color: #991b1b;
+    }
+    .flow-person-chip .flow-av img { width: 100%; height: 100%; object-fit: cover; }
+    .flow-person-chip .flow-person-name { max-width: 7.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #334155; }
+    .fn-disc { font-size: 10px; color: #64748b; margin-top: 0.35rem; }
+    .wg-chat-fab {
+      position: fixed; right: 1.1rem; bottom: 1.1rem; z-index: 400;
+      padding: 0.55rem 0.85rem; border-radius: 999px; border: none; cursor: pointer;
+      background: linear-gradient(135deg, #dc2626, #b91c1c); color: #fff; font-weight: 600; font-size: 13px;
+      box-shadow: 0 8px 28px rgba(220, 38, 38, 0.35);
+    }
+    .wg-chat-panel {
+      position: fixed; right: 1.1rem; bottom: 4.25rem; z-index: 399; width: min(100vw - 2rem, 380px); max-height: min(70vh, 480px);
+      display: flex; flex-direction: column; background: #fff; border: 1px solid var(--border); border-radius: 12px;
+      box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18); overflow: hidden;
+    }
+    .wg-chat-panel.hidden { display: none !important; }
+    .wg-chat-head { display: flex; align-items: center; gap: 0.35rem; padding: 0.55rem 0.65rem; border-bottom: 1px solid #f1f5f9; background: #fafafa; }
+    .wg-chat-head button { font-size: 11px; padding: 0.2rem 0.45rem; border-radius: 6px; border: 1px solid #e2e8f0; background: #fff; cursor: pointer; }
+    .wg-chat-head button.wg-tab-active { border-color: #fca5a5; background: #fff7f7; color: #991b1b; font-weight: 600; }
+    .wg-chat-messages { flex: 1; min-height: 160px; overflow-y: auto; padding: 0.5rem 0.65rem; font-size: 12px; background: #f8fafc; }
+    .wg-msg { margin-bottom: 0.45rem; line-height: 1.45; }
+    .wg-msg .wg-msg-from { font-weight: 600; color: #0f172a; }
+    .wg-msg .wg-msg-time { font-size: 10px; color: #94a3b8; margin-left: 0.35rem; }
+    .wg-chat-input-row { display: flex; gap: 0.35rem; padding: 0.5rem; border-top: 1px solid #f1f5f9; background: #fff; }
+    .wg-chat-input-row input { flex: 1; font-size: 12px; padding: 0.35rem 0.5rem; border-radius: 8px; border: 1px solid #e2e8f0; }
     .flow-node-actions {
       display: flex; flex-wrap: wrap; gap: 0.25rem; align-items: center;
       margin-top: 0.45rem; padding-top: 0.45rem; border-top: 1px solid #f1f5f9;
@@ -1794,7 +1833,10 @@
           id: "c1", taskId: "t_p1_root", author: "叙事导演", body: "请 @" + pm + " 确认反派台词冻结版，口型才能锁。",
           parentId: null, at: [pm], createdAt: new Date().toISOString()
         }
-      ]
+      ],
+      personProfiles: {},
+      siteChat: { global: [], threads: {} },
+      chatUi: { open: false, tab: "global", peer: "" }
     };
   }
 
@@ -1814,6 +1856,9 @@
       tasks: [],
       relations: [],
       comments: [],
+      personProfiles: {},
+      siteChat: { global: [], threads: {} },
+      chatUi: { open: false, tab: "global", peer: "" },
     };
   }
 
@@ -1874,6 +1919,11 @@
     if (o.avatar === undefined) o.avatar = "👤";
     if (o.profileTitle === undefined) o.profileTitle = "";
     if (o.profileBio === undefined) o.profileBio = "";
+    if (!o.personProfiles || typeof o.personProfiles !== "object") o.personProfiles = {};
+    if (!o.siteChat || typeof o.siteChat !== "object") o.siteChat = { global: [], threads: {} };
+    if (!Array.isArray(o.siteChat.global)) o.siteChat.global = [];
+    if (!o.siteChat.threads || typeof o.siteChat.threads !== "object") o.siteChat.threads = {};
+    if (!o.chatUi || typeof o.chatUi !== "object") o.chatUi = { open: false, tab: "global", peer: "" };
     if (o.projects && o.projects.length) {
       for (var pi = 0; pi < o.projects.length; pi++) {
         var op = o.projects[pi];
@@ -3250,6 +3300,78 @@
     );
   }
 
+  function dmThreadKey(a, b) {
+    var x = String(a || "").trim();
+    var y = String(b || "").trim();
+    if (!x || !y) return "";
+    if (x === y) return x + "\n__self\n";
+    return x < y ? x + "\n|\n" + y : y + "\n|\n" + x;
+  }
+
+  function getPersonProfile(displayName) {
+    var k = String(displayName || "").trim();
+    if (!state.personProfiles) state.personProfiles = {};
+    if (!k) {
+      return { department: "", username: "", phone: "", email: "", avatarUrl: "", note: "" };
+    }
+    if (!state.personProfiles[k]) state.personProfiles[k] = {};
+    var p = state.personProfiles[k];
+    return {
+      department: p.department != null ? String(p.department) : "",
+      username: p.username != null ? String(p.username) : k,
+      phone: p.phone != null ? String(p.phone) : "",
+      email: p.email != null ? String(p.email) : "",
+      avatarUrl: p.avatarUrl != null ? String(p.avatarUrl) : "",
+      note: p.note != null ? String(p.note) : "",
+    };
+  }
+
+  function flowPersonChipHtml(displayName, roleLabel) {
+    var k = String(displayName || "").trim();
+    if (!k) return "";
+    var prof = getPersonProfile(k);
+    var avRaw = prof.avatarUrl || initialsOf(k);
+    var avInner = isAvatarUrl(avRaw)
+      ? '<img src="' + esc(avRaw) + '" alt="" />'
+      : '<span class="flow-av-text">' + esc(String(avRaw).slice(0, 2)) + "</span>";
+    return (
+      '<span class="flow-person-chip" data-person-profile="' +
+      esc(k) +
+      '" title="' +
+      esc(roleLabel + "：" + k) +
+      ' · 点击查看资料/发消息">' +
+      '<span class="flow-av">' +
+      avInner +
+      "</span>" +
+      '<span class="flow-person-name">' +
+      esc(k) +
+      "</span></span>"
+    );
+  }
+
+  function renderFlowPeopleRowHtml(t) {
+    var parts = [];
+    var asg = String(t.assignee || "").trim();
+    if (asg) parts.push(flowPersonChipHtml(asg, "负责人"));
+    var cols = parseCommaMembers(t.collaborators || "");
+    for (var ci = 0; ci < cols.length; ci++) {
+      parts.push(flowPersonChipHtml(cols[ci], "协作"));
+    }
+    if (!parts.length) {
+      return '<div class="fn-people muted" style="font-size:11px">未指定负责人 / 协作人</div>';
+    }
+    return '<div class="fn-people">' + parts.join("") + "</div>";
+  }
+
+  function taskDiscussionCount(taskId) {
+    if (!state.comments || !taskId) return 0;
+    var n = 0;
+    for (var i = 0; i < state.comments.length; i++) {
+      if (state.comments[i].taskId === taskId) n++;
+    }
+    return n;
+  }
+
   function renderFlowNode(proj, t, depth, chainCtx, pipelineCtx, opts) {
     opts = opts || {};
     depth = depth || 0;
@@ -3262,6 +3384,18 @@
     var colAttr =
       pipelineCtx && !isChainProject(proj)
         ? ' data-flow-column-stage="' + esc(String(pipelineCtx.taskStage)) + '"'
+        : "";
+    var discN = taskDiscussionCount(t.id);
+    var discHint =
+      discN > 0
+        ? '<div class="fn-disc">讨论区 · ' + discN + " 条</div>"
+        : '<div class="fn-disc muted">讨论区 · 暂无</div>';
+    var descHint =
+      t.description && String(t.description).trim()
+        ? '<div class="fn-meta" style="margin-top:0.25rem">' +
+          esc(String(t.description).slice(0, 48)) +
+          (String(t.description).length > 48 ? "…" : "") +
+          "</div>"
         : "";
     return (
       '<div class="flow-node ' +
@@ -3278,18 +3412,22 @@
       "</div>" +
       '<div class="' +
       flowDdlStripClass(t) +
-      '" title="时间要求">' +
+      '" title="完成截止时间">' +
       esc(flowDdlStripLabel(t)) +
       "</div>" +
-      '<div class="fn-meta">' +
+      '<div class="fn-status-row">' +
+      '<span class="' +
+      badgeClass(t.status) +
+      '">' +
       esc(stLabel) +
-  (t.assignee ? " · " + esc(t.assignee) : "") +
-      (depBlockers.length && t.status !== "done" ? " · 依赖阻塞(" + depBlockers.length + ")" : "") +
-      (t.deadline ? " · 截止 " + esc(String(t.deadline).slice(0, 10)) : "") +
-      (t.description && String(t.description).trim()
-        ? " · " + esc(String(t.description).slice(0, 22)) + (String(t.description).length > 22 ? "…" : "")
+      "</span>" +
+      (depBlockers.length && t.status !== "done"
+        ? '<span class="fn-dep">依赖阻塞 ' + depBlockers.length + "</span>"
         : "") +
       "</div>" +
+      renderFlowPeopleRowHtml(t) +
+      discHint +
+      descHint +
       renderFlowNodeActionsHtml(proj, t) +
       "</div>"
     );
@@ -5515,6 +5653,195 @@
     }
   }
 
+  function renderChatDockHtml() {
+    if (!state.siteChat) state.siteChat = { global: [], threads: {} };
+    if (!state.chatUi) state.chatUi = { open: false, tab: "global", peer: "" };
+    if (!Array.isArray(state.siteChat.global)) state.siteChat.global = [];
+    if (!state.siteChat.threads) state.siteChat.threads = {};
+    var open = !!state.chatUi.open;
+    var tab = state.chatUi.tab || "global";
+    var peer = state.chatUi.peer || "";
+    var msgs = [];
+    if (tab === "global") {
+      msgs = state.siteChat.global;
+    } else if (peer) {
+      var k = dmThreadKey(state.userName, peer);
+      msgs = state.siteChat.threads[k] || [];
+    }
+    var msgHtml = "";
+    for (var mi = 0; mi < msgs.length; mi++) {
+      var m = msgs[mi];
+      var tmt = m.createdAt ? esc(String(m.createdAt).slice(0, 16).replace("T", " ")) : "";
+      msgHtml +=
+        '<div class="wg-msg"><div><span class="wg-msg-from">' +
+        esc(m.from) +
+        '</span><span class="wg-msg-time">' +
+        tmt +
+        "</span></div><div>" +
+        esc(m.body) +
+        "</div></div>";
+    }
+    if (!msgHtml) msgHtml = '<p class="muted" style="margin:0;font-size:12px">暂无消息，发送一条开始协作吧</p>';
+    var panelClass = "wg-chat-panel" + (open ? "" : " hidden");
+    var ph =
+      tab === "direct" && !peer ? "请先点击流程图中成员头像，再在此私聊" : "输入消息，Enter 发送";
+    return (
+      '<button type="button" class="wg-chat-fab" id="wg-chat-fab" title="站内消息">💬 消息</button>' +
+      '<div class="' +
+      panelClass +
+      '" id="wg-chat-panel">' +
+      '<div class="wg-chat-head">' +
+      '<button type="button" class="' +
+      (tab === "global" ? "wg-tab-active " : "") +
+      'wg-tab-chat" data-wg-chat-tab="global">全员</button>' +
+      '<button type="button" class="' +
+      (tab === "direct" ? "wg-tab-active " : "") +
+      'wg-tab-chat" data-wg-chat-tab="direct">私聊' +
+      (peer ? " · " + esc(peer) : "") +
+      "</button>" +
+      '<button type="button" id="wg-chat-close" style="margin-left:auto;font-size:11px;border:none;background:transparent;cursor:pointer;color:#64748b">✕</button></div>' +
+      '<div class="wg-chat-messages" id="wg-chat-messages">' +
+      msgHtml +
+      "</div>" +
+      '<div class="wg-chat-input-row">' +
+      '<input type="text" id="wg-chat-input" placeholder="' +
+      esc(ph) +
+      '" />' +
+      '<button type="button" class="btn btn-primary btn-sm" id="wg-chat-send">发送</button></div></div>'
+    );
+  }
+
+  function bindChatDock() {
+    var fab = document.getElementById("wg-chat-fab");
+    var closeBtn = document.getElementById("wg-chat-close");
+    if (fab) {
+      fab.onclick = function () {
+        state.chatUi.open = !state.chatUi.open;
+        save(state);
+        render();
+      };
+    }
+    if (closeBtn) {
+      closeBtn.onclick = function () {
+        state.chatUi.open = false;
+        save(state);
+        render();
+      };
+    }
+    var tabs = document.querySelectorAll("[data-wg-chat-tab]");
+    for (var ti = 0; ti < tabs.length; ti++) {
+      tabs[ti].onclick = function () {
+        var t = this.getAttribute("data-wg-chat-tab");
+        state.chatUi.tab = t;
+        if (t === "global") state.chatUi.peer = "";
+        save(state);
+        render();
+      };
+    }
+    function sendChatMsg() {
+      var inp = document.getElementById("wg-chat-input");
+      var body = (inp && inp.value) || "";
+      if (!body.trim()) return;
+      if (!state.siteChat) state.siteChat = { global: [], threads: {} };
+      if (!state.siteChat.global) state.siteChat.global = [];
+      if (!state.siteChat.threads) state.siteChat.threads = {};
+      var entry = {};
+      entry.id = uid();
+      entry.from = state.userName;
+      entry.body = body.trim();
+      entry.createdAt = new Date().toISOString();
+      if (state.chatUi.tab === "global") {
+        state.siteChat.global.push(entry);
+      } else {
+        var peer = state.chatUi.peer;
+        if (!peer) {
+          alert("请先点击流程图或任务详情中的成员头像，在资料卡中点「发私信」。");
+          return;
+        }
+        var dk = dmThreadKey(state.userName, peer);
+        if (!state.siteChat.threads[dk]) state.siteChat.threads[dk] = [];
+        state.siteChat.threads[dk].push(entry);
+      }
+      if (inp) inp.value = "";
+      save(state);
+      render();
+    }
+    var send = document.getElementById("wg-chat-send");
+    if (send) send.onclick = sendChatMsg;
+    var inpEl = document.getElementById("wg-chat-input");
+    if (inpEl) {
+      inpEl.onkeydown = function (ev) {
+        if (ev.key === "Enter") sendChatMsg();
+      };
+    }
+  }
+
+  function openPersonProfileModal(displayName) {
+    var k = String(displayName || "").trim();
+    if (!k) return;
+    if (!state.personProfiles) state.personProfiles = {};
+    if (!state.personProfiles[k]) state.personProfiles[k] = {};
+    var p = getPersonProfile(k);
+    openModal(
+      "<h3>成员资料</h3>" +
+        '<p class="muted" style="font-size:12px;margin:0 0 0.45rem">点击头像可查看资料；信息仅保存在本机浏览器。</p>' +
+        '<div class="row"><label>姓名</label><input class="input" id="pp-name" value="' +
+        esc(k) +
+        '" readonly /></div>' +
+        '<div class="row"><label>部门</label><input class="input" id="pp-dept" placeholder="部门" value="' +
+        esc(p.department) +
+        '" /></div>' +
+        '<div class="row"><label>用户名</label><input class="input" id="pp-user" placeholder="登录名 / 昵称" value="' +
+        esc(p.username) +
+        '" /></div>' +
+        '<div class="row"><label>联系方式</label><input class="input" id="pp-phone" placeholder="手机 / 企微" value="' +
+        esc(p.phone) +
+        '" /></div>' +
+        '<div class="row"><label>邮箱</label><input class="input" id="pp-email" type="email" placeholder="email" value="' +
+        esc(p.email) +
+        '" /></div>' +
+        '<div class="row"><label>头像 URL</label><input class="input" id="pp-avatar" placeholder="https://… 或留空显示首字" value="' +
+        esc(p.avatarUrl) +
+        '" /></div>' +
+        '<div class="row"><label>备注</label><textarea class="input" id="pp-note" style="min-height:56px" placeholder="备注">' +
+        esc(p.note) +
+        "</textarea></div>" +
+        '<div class="flex" style="margin-top:0.5rem;gap:0.35rem;flex-wrap:wrap">' +
+        '<button type="button" class="btn btn-primary" id="pp-save">保存</button>' +
+        '<button type="button" class="btn" id="pp-msg">发私信</button>' +
+        '<button type="button" class="btn" id="pp-close">关闭</button></div>'
+    );
+    document.getElementById("pp-close").onclick = closeModal;
+    document.getElementById("pp-save").onclick = function () {
+      state.personProfiles[k] = {
+        department: (document.getElementById("pp-dept") && document.getElementById("pp-dept").value) || "",
+        username: (document.getElementById("pp-user") && document.getElementById("pp-user").value) || k,
+        phone: (document.getElementById("pp-phone") && document.getElementById("pp-phone").value) || "",
+        email: (document.getElementById("pp-email") && document.getElementById("pp-email").value) || "",
+        note: (document.getElementById("pp-note") && document.getElementById("pp-note").value) || "",
+        avatarUrl: (document.getElementById("pp-avatar") && document.getElementById("pp-avatar").value) || "",
+      };
+      save(state);
+      closeModal();
+      render();
+    };
+    document.getElementById("pp-msg").onclick = function () {
+      state.personProfiles[k] = state.personProfiles[k] || {};
+      state.personProfiles[k].department = (document.getElementById("pp-dept") && document.getElementById("pp-dept").value) || "";
+      state.personProfiles[k].username = (document.getElementById("pp-user") && document.getElementById("pp-user").value) || k;
+      state.personProfiles[k].phone = (document.getElementById("pp-phone") && document.getElementById("pp-phone").value) || "";
+      state.personProfiles[k].email = (document.getElementById("pp-email") && document.getElementById("pp-email").value) || "";
+      state.personProfiles[k].avatarUrl = (document.getElementById("pp-avatar") && document.getElementById("pp-avatar").value) || "";
+      state.personProfiles[k].note = (document.getElementById("pp-note") && document.getElementById("pp-note").value) || "";
+      state.chatUi.open = true;
+      state.chatUi.tab = "direct";
+      state.chatUi.peer = k;
+      save(state);
+      closeModal();
+      render();
+    };
+  }
+
   function render() {
     if (!activeAccount || !state) {
       appEl.innerHTML = renderAuthScreen();
@@ -5563,12 +5890,14 @@
       renderWelcomeBanner() +
       renderMain(proj) +
       "</main></div>" +
-      overlayHtml;
+      overlayHtml +
+      renderChatDockHtml();
 
     appEl.innerHTML = html;
     bindNav();
     bindWelcomeBanner();
     bindGlobalActions();
+    bindChatDock();
     if (state.view === "projects" && proj) bindWorkspace(proj);
     if (state.view === "dashboard") {
       bindDashboard();
@@ -7828,6 +8157,14 @@
       function (e) {
         var tgt = e.target;
         if (!tgt || !tgt.closest) return;
+        var personChip = tgt.closest("[data-person-profile]");
+        if (personChip && appEl.contains(personChip)) {
+          e.stopPropagation();
+          e.preventDefault();
+          var pn = personChip.getAttribute("data-person-profile");
+          if (pn) openPersonProfileModal(pn);
+          return;
+        }
         var actBtn = tgt.closest(".flow-node-act[data-flow-act][data-task-id]");
         if (actBtn && appEl.contains(actBtn)) {
           e.stopPropagation();
@@ -8149,9 +8486,16 @@
     var chtml = "";
     for (var i = 0; i < coms.length; i++) {
       var c = coms[i];
+      var ct = c.createdAt ? esc(String(c.createdAt).slice(0, 16).replace("T", " ")) : "";
       chtml +=
-        '<div class="card" style="padding:0.45rem 0.55rem;margin-bottom:0.35rem;font-size:12px">' +
-        "<strong>" + esc(c.author) + "</strong> · " + esc(c.body) + "</div>";
+        '<div class="card" style="padding:0.45rem 0.55rem;margin-bottom:0.35rem;font-size:12px;line-height:1.45">' +
+        "<strong>" +
+        esc(c.author) +
+        "</strong>" +
+        (ct ? '<span class="muted" style="font-size:10px;margin-left:0.35rem">' + ct + "</span>" : "") +
+        "<div style=\"margin-top:0.25rem\">" +
+        esc(c.body) +
+        "</div></div>";
     }
     var stageRowLabel = projForTask && isChainProject(projForTask) ? "串联顺序" : "任务顺序";
     var insSibLabel = projForTask && isChainProject(projForTask) && !t.parentId ? "下方插入" : "插入并列";
@@ -8172,8 +8516,22 @@
         "</div></div>" +
         '<div class="row"><label>状态</label><span class="' + badgeClass(t.status) + '">' + esc(STATUS_LABEL[t.status] || t.status) + "</span></div>" +
         '<div class="row"><label>优先级</label><span class="' + prioClass(t.priority) + '">' + esc(t.priority) + "</span></div>" +
-        '<div class="row"><label>负责人</label><div>' + esc(t.assignee || "—") + "</div></div>" +
-        '<div class="row"><label>协作人</label><div>' + esc(t.collaborators || "—") + "</div></div>" +
+        '<div class="row"><label>负责人</label><div class="fn-people">' +
+        (t.assignee
+          ? flowPersonChipHtml(String(t.assignee).trim(), "负责人")
+          : '<span class="muted">—</span>') +
+        "</div></div>" +
+        '<div class="row"><label>协作人</label><div class="fn-people" style="flex-wrap:wrap">' +
+        (function () {
+          var cols = parseCommaMembers(t.collaborators || "");
+          if (!cols.length) return '<span class="muted">—</span>';
+          var h = "";
+          for (var cx = 0; cx < cols.length; cx++) {
+            h += flowPersonChipHtml(cols[cx], "协作");
+          }
+          return h;
+        })() +
+        "</div></div>" +
         '<div class="row"><label>创建人</label><div>' + esc(t.createdBy || "—") + "</div></div>" +
         '<div class="row"><label>截止日期（DDL）</label><div>' + ddlStr + "</div></div>" +
         '<div class="row"><label>开始时间</label><div>' + startStr + "</div></div>" +
@@ -8181,9 +8539,10 @@
         '<div class="row"><label>实际工时</label><div>' + actStr + "</div></div>" +
         '<div class="row"><label>标签</label><div>' + esc(t.tags || "—") + "</div></div>" +
         '<div class="row"><label>关系</label><div class="muted" style="font-size:12px">' + (relLines.length ? esc(relLines.join("；")) : "无") + "</div></div>" +
-        "<h4 style=\"margin:0.75rem 0 0.35rem;font-size:0.9rem\">评论</h4>" +
+        "<h4 style=\"margin:0.75rem 0 0.35rem;font-size:0.9rem\">任务讨论区</h4>" +
+        '<p class="muted" style="margin:0 0 0.35rem;font-size:11px">与负责人、协作人沟通任务进展；可 @成员。</p>' +
         chtml +
-        '<input class="input" id="nv-com" placeholder="写评论，可 @用户名" style="margin-top:0.5rem" />' +
+        '<input class="input" id="nv-com" placeholder="参与讨论，可 @用户名" style="margin-top:0.5rem" />' +
         '<div class="flex" style="margin-top:0.5rem;justify-content:space-between;align-items:center">' +
         '<div class="flex" style="gap:0.35rem;flex-wrap:wrap">' +
         siblingBtn +
@@ -8192,9 +8551,20 @@
         '<div class="flex" style="gap:0.35rem">' +
         '<button type="button" class="btn" id="nv-close">关闭</button> ' +
         '<button type="button" class="btn btn-primary" id="nv-edit">编辑</button> ' +
-        '<button type="button" class="btn btn-primary" id="nv-send">发评论</button></div></div>'
+        '<button type="button" class="btn btn-primary" id="nv-send">发送到讨论区</button></div></div>'
     );
     document.getElementById("nv-close").onclick = closeModal;
+    if (modalEl) {
+      var profChips = modalEl.querySelectorAll("[data-person-profile]");
+      for (var pci = 0; pci < profChips.length; pci++) {
+        profChips[pci].onclick = function (ev) {
+          ev.stopPropagation();
+          ev.preventDefault();
+          var pn = this.getAttribute("data-person-profile");
+          if (pn) openPersonProfileModal(pn);
+        };
+      }
+    }
     var nvChild = document.getElementById("nv-child");
     if (nvChild) {
       nvChild.onclick = function () {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { format } from "date-fns";
 import type { TaskStatus } from "@prisma/client";
 
 const STATUS_FILL: Record<TaskStatus, string> = {
@@ -11,7 +12,23 @@ const STATUS_FILL: Record<TaskStatus, string> = {
   done: "#22c55e",
 };
 
-type Node = { id: string; label: string; status: TaskStatus };
+const STATUS_ZH: Record<TaskStatus, string> = {
+  todo: "待办",
+  doing: "进行中",
+  blocked: "阻塞",
+  review: "评审",
+  done: "完成",
+};
+
+type GraphNode = {
+  id: string;
+  label: string;
+  status: TaskStatus;
+  assigneeName?: string | null;
+  assigneeImage?: string | null;
+  collaboratorNames?: string[];
+  deadline?: string | Date | null;
+};
 type Edge = { id: string; source: string; target: string; kind: string; tree?: boolean };
 
 const KIND_COLOR: Record<string, string> = {
@@ -21,19 +38,25 @@ const KIND_COLOR: Record<string, string> = {
   RELATED: "#a855f7",
 };
 
+function initials(n: string | null | undefined) {
+  const s = (n ?? "").trim();
+  if (!s) return "?";
+  return s.slice(0, 1).toUpperCase();
+}
+
 export function TaskGraphView({
   nodes,
   edges,
   onOpenTask,
 }: {
-  nodes: Node[];
+  nodes: GraphNode[];
   edges: Edge[];
   onOpenTask: (id: string) => void;
 }) {
   const { positions, w, h } = useMemo(() => {
     const n = nodes.length || 1;
     const cx = 400;
-    const cy = 220;
+    const cy = 260;
     const r = Math.min(180, 60 + n * 8);
     const pos = new Map<string, { x: number; y: number }>();
     nodes.forEach((node, i) => {
@@ -43,13 +66,13 @@ export function TaskGraphView({
         y: cy + r * Math.sin(ang),
       });
     });
-    return { positions: pos, w: 800, h: 440 };
+    return { positions: pos, w: 880, h: 520 };
   }, [nodes]);
 
   return (
     <div className="overflow-auto rounded-lg border border-border bg-card/20 p-4">
       <p className="mb-3 text-xs text-muted-foreground">
-        图例：灰线=父子 · 红=阻塞 · 蓝=依赖 · 紫=关联
+        节点含任务名、状态、截止日与负责人；点击打开详情与讨论区。图例：灰=父子 · 红=阻塞 · 蓝=依赖 · 紫=关联
       </p>
       <svg width={w} height={h} className="mx-auto">
         {edges.map((e) => {
@@ -80,27 +103,55 @@ export function TaskGraphView({
         {nodes.map((node) => {
           const p = positions.get(node.id);
           if (!p) return null;
+          const ddl =
+            node.deadline != null
+              ? format(typeof node.deadline === "string" ? new Date(node.deadline) : node.deadline, "MM-dd")
+              : "无截止";
+          const stZh = STATUS_ZH[node.status] ?? node.status;
+          const title =
+            node.label.length > 18 ? `${node.label.slice(0, 18)}…` : node.label;
+          const asg = node.assigneeName ?? "未指定";
+          const cols =
+            node.collaboratorNames?.length ? `协:${node.collaboratorNames.slice(0, 2).join("·")}` : "";
           return (
             <g key={node.id} className="cursor-pointer" onClick={() => onOpenTask(node.id)}>
-              <circle cx={p.x} cy={p.y} r={22} fill={STATUS_FILL[node.status] ?? "#64748b"} opacity={0.95} />
+              <circle cx={p.x} cy={p.y} r={26} fill={STATUS_FILL[node.status] ?? "#64748b"} opacity={0.95} />
               <text
                 x={p.x}
-                y={p.y + 4}
+                y={p.y + 5}
                 textAnchor="middle"
-                dominantBaseline="middle"
-                className="fill-white text-[9px] font-medium"
+                className="fill-white text-[11px] font-semibold"
                 style={{ pointerEvents: "none" }}
               >
-                {node.label.slice(0, 4)}
+                {initials(node.assigneeName ?? node.label)}
               </text>
               <text
                 x={p.x}
-                y={p.y + 38}
+                y={p.y + 44}
                 textAnchor="middle"
-                className="fill-muted-foreground text-[10px]"
-                style={{ maxWidth: 80 }}
+                className="fill-foreground text-[11px] font-semibold"
+                style={{ pointerEvents: "none" }}
               >
-                {node.label.length > 14 ? `${node.label.slice(0, 14)}…` : node.label}
+                {title}
+              </text>
+              <text
+                x={p.x}
+                y={p.y + 58}
+                textAnchor="middle"
+                className="fill-muted-foreground text-[9px]"
+                style={{ pointerEvents: "none" }}
+              >
+                {stZh} · {ddl}
+              </text>
+              <text
+                x={p.x}
+                y={p.y + 70}
+                textAnchor="middle"
+                className="fill-muted-foreground text-[9px]"
+                style={{ pointerEvents: "none" }}
+              >
+                {asg.length > 10 ? `${asg.slice(0, 10)}…` : asg}
+                {cols ? ` ${cols.length > 12 ? `${cols.slice(0, 12)}…` : cols}` : ""}
               </text>
             </g>
           );
