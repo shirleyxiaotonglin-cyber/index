@@ -1466,7 +1466,23 @@
       connectSupabaseRealtime();
       render();
     }
-    state = await loadStateFromSupabase(user.id);
+    try {
+      state = await loadStateFromSupabase(user.id);
+    } catch (eLoad) {
+      console.error("loadStateFromSupabase", eLoad);
+      if (!state) {
+        var cfb = readSbStateCache(user.id);
+        if (cfb && ((cfb.projects && cfb.projects.length) || (cfb.tasks && cfb.tasks.length))) {
+          state = migrateStateObject(JSON.parse(JSON.stringify(cfb)));
+          postLoadState(state);
+          fixCurrentProjectPointer(state);
+        } else {
+          state = emptyState(activeAccount);
+          postLoadState(state);
+        }
+        syncSavedSnapshotFromState(state);
+      }
+    }
     var cachedAfterLoad = readSbStateCache(user.id);
     if (state && cachedAfterLoad && cachedAfterLoad.siteChat) {
       state.siteChat = {
@@ -5622,6 +5638,7 @@
       btnIn.onclick = function () {
         var u = (document.getElementById("auth-in-user") && document.getElementById("auth-in-user").value) || "";
         u = u.trim();
+        if (useSupabaseMode()) u = u.toLowerCase();
         var pw = (document.getElementById("auth-in-pass") && document.getElementById("auth-in-pass").value) || "";
         setMsg("");
         if (useSupabaseMode()) {
@@ -5634,6 +5651,7 @@
             return;
           }
           setMsg("正在登录…");
+          if (btnIn) btnIn.disabled = true;
           ensureSupabaseClient()
             .then(function () {
               return __sb.auth.signInWithPassword({ email: u, password: pw });
@@ -5643,17 +5661,21 @@
                 setMsg((res && res.error && res.error.message) || "登录失败");
                 return null;
               }
-              return __sb.auth.getUser();
-            })
-            .then(function (ur) {
-              if (!ur || !ur.data || !ur.data.user) return;
-              return applySupabaseUser(ur.data.user);
+              var usr = res.data && res.data.user;
+              if (!usr) {
+                setMsg("登录失败：未返回用户信息，请稍后重试");
+                return null;
+              }
+              return applySupabaseUser(usr);
             })
             .then(function () {
               if (activeAccount && state) render();
             })
             .catch(function (e) {
               setMsg((e && e.message) || "登录失败");
+            })
+            .finally(function () {
+              if (btnIn) btnIn.disabled = false;
             });
           return;
         }
@@ -5836,6 +5858,7 @@
       btnUp.onclick = function () {
         var u = (document.getElementById("auth-up-user") && document.getElementById("auth-up-user").value) || "";
         u = u.trim();
+        if (useSupabaseMode()) u = u.toLowerCase();
         var pw = (document.getElementById("auth-up-pass") && document.getElementById("auth-up-pass").value) || "";
         var pw2 = (document.getElementById("auth-up-pass2") && document.getElementById("auth-up-pass2").value) || "";
         setMsg("");
