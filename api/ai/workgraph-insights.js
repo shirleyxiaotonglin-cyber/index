@@ -171,24 +171,13 @@ module.exports = async function handler(req, res) {
     var mt = String(body.text || "").trim();
     var hasToday = String(body.today || "").trim();
     if (mt && !hasToday) {
-      var h = req.headers["x-forwarded-host"] || req.headers.host || "";
-      var p = String(req.headers["x-forwarded-proto"] || "https").split(",")[0].trim() || "https";
-      if (h) {
-        try {
-          var du = p + "://" + h + "/api/ai/parse-meeting";
-          var dr = await fetch(du, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: mt }),
-          });
-          var dtxt = await dr.text();
-          try {
-            return res.status(dr.status).json(JSON.parse(dtxt));
-          } catch (eD) {
-            return res.status(dr.status).send(dtxt);
-          }
-        } catch (eDel) {}
+      var { runMeetingParseFromText } = require("./meeting-parse-core");
+      var out = await runMeetingParseFromText(mt);
+      if (!out.ok) {
+        var st = out.status || 502;
+        return res.status(st).json({ ok: false, error: out.error, detail: out.detail });
       }
+      return res.status(200).json({ ok: true, parsed: out.parsed });
     }
     return res.status(400).json({ ok: false, error: "kind 无效" });
   }
