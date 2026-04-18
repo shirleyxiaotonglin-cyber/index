@@ -866,8 +866,20 @@
     }
   }
 
+  /** 流程图布局：并列组、排序等（列 extra jsonb） */
+  function taskExtraFromTask(t) {
+    var ex = {};
+    if (t.flowOrder != null && t.flowOrder !== "") {
+      var n = Number(t.flowOrder);
+      if (!isNaN(n)) ex.flowOrder = n;
+    }
+    if (t.parallelGroup) ex.parallelGroup = String(t.parallelGroup);
+    if (t.parallelWithTaskId) ex.parallelWithTaskId = String(t.parallelWithTaskId);
+    return ex;
+  }
+
   function taskFromRow(row) {
-    return {
+    var o = {
       id: row.id,
       projectId: row.project_id,
       title: row.title || "",
@@ -886,6 +898,15 @@
       actualHours: row.actual_hours != null ? Number(row.actual_hours) : 0,
       tags: row.tags || "",
     };
+    if (row.extra && typeof row.extra === "object") {
+      if (row.extra.flowOrder != null && row.extra.flowOrder !== "") {
+        var fo = Number(row.extra.flowOrder);
+        if (!isNaN(fo)) o.flowOrder = fo;
+      }
+      if (row.extra.parallelGroup) o.parallelGroup = String(row.extra.parallelGroup);
+      if (row.extra.parallelWithTaskId) o.parallelWithTaskId = String(row.extra.parallelWithTaskId);
+    }
+    return o;
   }
 
   function taskRowFromTask(t) {
@@ -907,8 +928,39 @@
       estimated_hours: t.estimatedHours != null ? t.estimatedHours : 0,
       actual_hours: t.actualHours != null ? t.actualHours : 0,
       tags: t.tags || "",
+      extra: taskExtraFromTask(t),
       updated_at: new Date().toISOString(),
     };
+  }
+
+  /** 刷新/多设备：当前项目与视图（profiles.preferences jsonb） */
+  function workspacePrefsFromState(st) {
+    if (!st) return {};
+    return {
+      view: st.view || "dashboard",
+      currentProjectId: st.currentProjectId || "",
+      workspaceTab: st.workspaceTab || "flow",
+      showFlowOverlay: !!st.showFlowOverlay,
+      scheduleWeekOffset: st.scheduleWeekOffset != null ? st.scheduleWeekOffset : 0,
+      scheduleProjectFilter: st.scheduleProjectFilter || "",
+    };
+  }
+
+  function mergeWorkspacePrefsIntoState(st, src) {
+    if (!st || !src) return;
+    if (src.view) st.view = src.view;
+    if (src.workspaceTab) st.workspaceTab = src.workspaceTab;
+    if (src.showFlowOverlay !== undefined && src.showFlowOverlay !== null) st.showFlowOverlay = !!src.showFlowOverlay;
+    if (src.scheduleWeekOffset != null) st.scheduleWeekOffset = src.scheduleWeekOffset;
+    if (src.scheduleProjectFilter !== undefined && src.scheduleProjectFilter !== null) {
+      st.scheduleProjectFilter = src.scheduleProjectFilter;
+    }
+    if (src.currentProjectId && st.projects && st.projects.length) {
+      var ok = st.projects.some(function (p) {
+        return p.id === src.currentProjectId;
+      });
+      if (ok) st.currentProjectId = src.currentProjectId;
+    }
   }
 
   function projectExtraFromProj(p) {
@@ -979,6 +1031,12 @@
       empty.avatar = avatar;
       empty.profileTitle = profileTitle;
       empty.profileBio = profileBio;
+      if (profRes.data && profRes.data.preferences && typeof profRes.data.preferences === "object") {
+        mergeWorkspacePrefsIntoState(empty, profRes.data.preferences);
+      } else {
+        var c0 = readSbStateCache(userId);
+        if (c0) mergeWorkspacePrefsIntoState(empty, c0);
+      }
       return empty;
     }
     if (ownIds.length) {
@@ -1113,6 +1171,12 @@
       relations: rels,
       comments: coms,
     };
+    if (profRes.data && profRes.data.preferences && typeof profRes.data.preferences === "object") {
+      mergeWorkspacePrefsIntoState(out, profRes.data.preferences);
+    } else {
+      var c1 = readSbStateCache(userId);
+      if (c1) mergeWorkspacePrefsIntoState(out, c1);
+    }
     migrateStateObject(out);
     postLoadState(out);
     fixCurrentProjectPointer(out);
@@ -1163,14 +1227,30 @@
         await deleteOrphanOwnedProjectsFromSupabase(uid);
         __sbOrphanPurgeNeeded = false;
       }
-      await __sb.from("profiles").upsert({
+      var prUpsert = await __sb.from("profiles").upsert({
         id: uid,
         display_name: state.userName || "",
         avatar: state.avatar || "👤",
         profile_title: state.profileTitle || "",
         profile_bio: state.profileBio || "",
+        preferences: workspacePrefsFromState(state),
         updated_at: new Date().toISOString(),
       });
+      if (prUpsert.error) {
+        var pem = String(prUpsert.error.message || prUpsert.error.details || "");
+        if (pem.indexOf("preferences") !== -1 || pem.indexOf("column") !== -1) {
+          await __sb.from("profiles").upsert({
+            id: uid,
+            display_name: state.userName || "",
+            avatar: state.avatar || "👤",
+            profile_title: state.profileTitle || "",
+            profile_bio: state.profileBio || "",
+            updated_at: new Date().toISOString(),
+          });
+        } else {
+          console.error("profiles upsert", prUpsert.error);
+        }
+      }
       var pi;
       for (pi = 0; pi < state.projects.length; pi++) {
         var p = state.projects[pi];
@@ -1197,7 +1277,17 @@
       }
       var ti;
       for (ti = 0; ti < state.tasks.length; ti++) {
-        await __sb.from("tasks").upsert(taskRowFromTask(state.tasks[ti]));
+        var trow = taskRowFromTask(state.tasks[ti]);
+        var tur = await __sb.from("tasks").upsert(trow);
+        if (tur.error) {
+          var tem = String(tur.error.message || tur.error.details || "");
+          if (tem.indexOf("extra") !== -1 || tem.indexOf("column") !== -1) {
+            delete trow.extra;
+            await __sb.from("tasks").upsert(trow);
+          } else {
+            console.error("tasks upsert", tur.error);
+          }
+        }
       }
       for (pi = 0; pi < state.projects.length; pi++) {
         var pid = state.projects[pi].id;
@@ -3820,6 +3910,7 @@
         state.currentProjectId = id;
         state.view = "projects";
         state.showFlowOverlay = false;
+        save(state);
         return;
       }
     }
@@ -3828,26 +3919,31 @@
       state.view = "projects";
       state.currentProjectId = null;
       state.showFlowOverlay = false;
+      save(state);
       return;
     }
     if (h === "#/schedule") {
       if (state.view === "schedule") return;
       state.view = "schedule";
+      save(state);
       return;
     }
     if (h === "#/ai") {
       if (state.view === "ai") return;
       state.view = "ai";
+      save(state);
       return;
     }
     if (h === "#/profile") {
       if (state.view === "profile") return;
       state.view = "profile";
+      save(state);
       return;
     }
     if (h === "#/messages") {
       if (state.view === "messages") return;
       state.view = "messages";
+      save(state);
       return;
     }
   }
@@ -7357,6 +7453,7 @@
           state.showFlowOverlay = false;
         }
         state.view = v;
+        save(state);
         render();
       };
     }
@@ -7534,6 +7631,7 @@
         state.view = "projects";
         state.showFlowOverlay = false;
         state.workspaceTab = "flow";
+        save(state);
         render();
         setTimeout(function () {
           var el = document.getElementById("project-space-anchor");
@@ -7558,6 +7656,7 @@
         state.view = "projects";
         state.showFlowOverlay = false;
         state.workspaceTab = "flow";
+        save(state);
         render();
         setTimeout(function () {
           var el = document.getElementById("project-space-anchor");
@@ -7710,6 +7809,7 @@
         state.view = "projects";
         state.showFlowOverlay = false;
         state.workspaceTab = "flow";
+        save(state);
         render();
       };
     }
@@ -7733,6 +7833,7 @@
         state.view = "projects";
         state.showFlowOverlay = false;
         state.workspaceTab = "flow";
+        save(state);
         render();
       };
     }
@@ -7743,6 +7844,7 @@
         state.view = "projects";
         state.showFlowOverlay = false;
         state.workspaceTab = "flow";
+        save(state);
         render();
         setTimeout(function () {
           var el = document.getElementById("project-space-anchor");
