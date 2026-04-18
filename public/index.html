@@ -387,18 +387,6 @@
       gap: 0.25rem; align-items: stretch; width: 100%;
       margin-top: 0.35rem; margin-bottom: 0.2rem; box-sizing: border-box;
     }
-    .flow-sibling-arrow {
-      display: flex; align-items: center; justify-content: center;
-      flex: 0 0 auto; min-width: 1.5rem; color: #94a3b8; user-select: none;
-      font-size: 1.15rem; font-weight: 700; padding: 0 0.15rem;
-    }
-    .flow-sibling-arrow .flow-sibling-arrow-inner {
-      display: flex; align-items: center; justify-content: center;
-      width: 2rem; height: 2rem; border-radius: 50%;
-      background: linear-gradient(135deg, #fef2f2, #fee2e2);
-      border: 1px solid #fecaca; color: #b91c1c; font-size: 0.95rem;
-      box-shadow: 0 1px 3px rgba(185, 28, 28, 0.15);
-    }
     .flow-child-branch {
       flex: 1 1 168px;
       min-width: 0;
@@ -3706,7 +3694,6 @@
       if (grp.length > 1) {
         html += '<div class="flow-children-row" title="同方框并列任务，左右并排">';
         for (var pj = 0; pj < grp.length; pj++) {
-          if (pj > 0) html += '<div class="flow-sibling-arrow"><span class="flow-sibling-arrow-inner">→</span></div>';
           html += '<div class="flow-child-branch">';
           html += renderFlowNodeRecursive(proj, allTs, grp[pj], 0, null, null);
           html += "</div>";
@@ -3776,7 +3763,6 @@
       if (grp.length > 1) {
         html += '<div class="flow-children-row" title="同一步骤内并列任务">';
         for (var pj = 0; pj < grp.length; pj++) {
-          if (pj > 0) html += '<div class="flow-sibling-arrow"><span class="flow-sibling-arrow-inner">→</span></div>';
           html += '<div class="flow-child-branch">';
           html += renderFlowNodeRecursive(proj, allTs, grp[pj], 0, chainCtx, null);
           html += "</div>";
