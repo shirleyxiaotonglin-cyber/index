@@ -5751,7 +5751,85 @@
     if (btnDemo) {
       btnDemo.onclick = function () {
         if (useSupabaseMode()) {
-          setMsg("Supabase 模式请使用邮箱注册或登录，不使用本地演示账号。");
+          setMsg("正在登录演示账号…");
+          if (btnDemo) btnDemo.disabled = true;
+          var demoEmail = String(DEMO_AUTH_USER).trim().toLowerCase();
+          var redirectTo = "";
+          try {
+            redirectTo = window.location.origin + window.location.pathname + (window.location.search || "");
+          } catch (eR) {}
+          ensureSupabaseClient()
+            .then(function () {
+              return __sb.auth.signInWithPassword({ email: demoEmail, password: DEMO_AUTH_PASS });
+            })
+            .then(function (res) {
+              if (res && !res.error && res.data && res.data.user) {
+                return applySupabaseUser(res.data.user);
+              }
+              if (res && !res.error && res.data && !res.data.user) {
+                setMsg("登录失败：未返回用户信息，请稍后重试");
+                return null;
+              }
+              var err = res && res.error;
+              if (err && /email not confirmed/i.test(err.message || "")) {
+                setMsg(
+                  "演示账号需邮箱验证后才能登录。请在 Supabase Authentication 中将该用户标为已确认，或暂时关闭「邮箱确认」。"
+                );
+                return null;
+              }
+              if (
+                err &&
+                !/invalid|wrong|incorrect|credentials|does not exist|no user/i.test(err.message || "")
+              ) {
+                setMsg(err.message || "演示账号登录失败");
+                return null;
+              }
+              return __sb.auth
+                .signUp({
+                  email: demoEmail,
+                  password: DEMO_AUTH_PASS,
+                  options: {
+                    emailRedirectTo: redirectTo || undefined,
+                    data: { display_name: String(demoEmail).split("@")[0] || demoEmail },
+                  },
+                })
+                .then(function (res2) {
+                  if (res2 && !res2.error && res2.data && res2.data.user && res2.data.session) {
+                    return applySupabaseUser(res2.data.user);
+                  }
+                  if (res2 && !res2.error && res2.data && res2.data.user && !res2.data.session) {
+                    setMsg(
+                      "演示账号已创建，但需邮箱验证后才能登录。请在 Supabase 中确认该用户或关闭「邮箱确认」。"
+                    );
+                    return null;
+                  }
+                  if (res2 && res2.error) {
+                    var m2 = (res2.error.message || "").toLowerCase();
+                    if (m2.indexOf("already") >= 0 || m2.indexOf("registered") >= 0) {
+                      return __sb.auth.signInWithPassword({ email: demoEmail, password: DEMO_AUTH_PASS }).then(function (res3) {
+                        if (res3 && !res3.error && res3.data && res3.data.user) {
+                          return applySupabaseUser(res3.data.user);
+                        }
+                        setMsg((res3 && res3.error && res3.error.message) || "演示账号不可用");
+                        return null;
+                      });
+                    }
+                    setMsg(res2.error.message || "演示账号注册失败");
+                    return null;
+                  }
+                  setMsg("演示账号不可用");
+                  return null;
+                });
+            })
+            .then(function () {
+              if (activeAccount && state) render();
+            })
+            .catch(function (e) {
+              setMsg((e && e.message) || "演示账号登录失败");
+            })
+            .finally(function () {
+              if (btnDemo) btnDemo.disabled = false;
+            });
           return;
         }
         setMsg("正在登录演示账号…");
