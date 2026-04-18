@@ -601,7 +601,28 @@
   /** 仅在用户本地删除项目后置位，避免每次 flush 都扫描孤儿项目 */
   var __sbOrphanPurgeNeeded = false;
   var __applyingRemoteSupabase = false;
+  /** 防止 Realtime 在本地 flush 未提交完时用旧快照覆盖 state（导入项目消失） */
+  var __sbFlushInFlight = false;
+  var __sbSuppressRemoteReloadUntil = 0;
   var projectOwnerIds = {};
+
+  function waitUntilNotApplyingRemoteSupabase(maxMs) {
+    return new Promise(function (resolve) {
+      var t0 = Date.now();
+      function tick() {
+        if (!__applyingRemoteSupabase) {
+          resolve();
+          return;
+        }
+        if (Date.now() - t0 >= maxMs) {
+          resolve();
+          return;
+        }
+        setTimeout(tick, 40);
+      }
+      tick();
+    });
+  }
 
   function useSupabaseMode() {
     try {
@@ -1132,6 +1153,8 @@
 
   async function flushSaveToSupabase() {
     if (!useSupabaseMode() || !__sb || !state) return;
+    await waitUntilNotApplyingRemoteSupabase(5000);
+    __sbFlushInFlight = true;
     try {
       var ures = await __sb.auth.getUser();
       var uid = ures.data.user && ures.data.user.id;
@@ -1225,8 +1248,11 @@
         });
       }
       persistSbStateCache(uid, state);
+      __sbSuppressRemoteReloadUntil = Date.now() + 3000;
     } catch (e) {
       console.error("Supabase save failed", e);
+    } finally {
+      __sbFlushInFlight = false;
     }
   }
 
@@ -1278,6 +1304,10 @@
     __sbReloadTimer = setTimeout(function () {
       __sbReloadTimer = null;
       if (!__sb || !activeAccount) return;
+      if (__sbFlushInFlight || Date.now() < __sbSuppressRemoteReloadUntil) {
+        scheduleSupabaseReload();
+        return;
+      }
       __sb.auth.getUser().then(function (res) {
         var u = res.data.user;
         if (!u) return;
@@ -2412,6 +2442,7 @@
         clearTimeout(__sbSaveTimer);
         __sbSaveTimer = null;
       }
+      await waitUntilNotApplyingRemoteSupabase(8000);
       await flushSaveToSupabase();
       return;
     }
