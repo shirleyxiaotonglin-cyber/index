@@ -559,6 +559,8 @@
   var __sbSaveTimer = null;
   var __sbReloadTimer = null;
   var __sbChannel = null;
+  /** 仅在用户本地删除项目后置位，避免每次 flush 都扫描孤儿项目 */
+  var __sbOrphanPurgeNeeded = false;
   var __applyingRemoteSupabase = false;
   var projectOwnerIds = {};
 
@@ -772,13 +774,13 @@
       var session = r.data.session;
       if (session) return session;
       await new Promise(function (res) {
-        setTimeout(res, 120);
+        setTimeout(res, 40);
       });
       r = await __sb.auth.getSession();
       session = r.data.session;
       if (session) return session;
       await new Promise(function (res) {
-        setTimeout(res, 280);
+        setTimeout(res, 120);
       });
       r = await __sb.auth.getSession();
       session = r.data.session;
@@ -864,18 +866,23 @@
     var avatar = "👤";
     var profileTitle = "";
     var profileBio = "";
-    var profRes = await sb.from("profiles").select("*").eq("id", userId).maybeSingle();
+    var boot = await Promise.all([
+      sb.from("profiles").select("*").eq("id", userId).maybeSingle(),
+      sb.from("project_members").select("project_id").eq("user_id", userId),
+      sb.from("projects").select("id").eq("owner_id", userId),
+    ]);
+    var profRes = boot[0];
     if (profRes.data) {
       displayName = profRes.data.display_name || "";
       avatar = profRes.data.avatar || "👤";
       profileTitle = profRes.data.profile_title || "";
       profileBio = profRes.data.profile_bio || "";
     }
-    var memRes = await sb.from("project_members").select("project_id").eq("user_id", userId);
+    var memRes = boot[1];
     var projectIds = (memRes.data || []).map(function (m) {
       return m.project_id;
     });
-    var ownRes = await sb.from("projects").select("id").eq("owner_id", userId);
+    var ownRes = boot[2];
     var ownIds = (ownRes.data || []).map(function (r) {
       return r.id;
     });
@@ -903,10 +910,14 @@
       empty.profileBio = profileBio;
       return empty;
     }
-    for (mi = 0; mi < ownIds.length; mi++) {
-      await sb.from("project_members").upsert(
-        { project_id: ownIds[mi], user_id: userId, role: "owner" },
-        { onConflict: "project_id,user_id" }
+    if (ownIds.length) {
+      await Promise.all(
+        ownIds.map(function (oid) {
+          return sb.from("project_members").upsert(
+            { project_id: oid, user_id: userId, role: "owner" },
+            { onConflict: "project_id,user_id" }
+          );
+        })
       );
     }
     var projRes = await sb.from("projects").select("*").in("id", projectIds);
@@ -923,11 +934,23 @@
         ownerNames[r.id] = r.display_name || "";
       });
     }
+    var membersByPid = {};
+    if (projectIds.length) {
+      var allPmRes = await sb
+        .from("project_members")
+        .select("project_id, user_id, profiles(display_name)")
+        .in("project_id", projectIds);
+      (allPmRes.data || []).forEach(function (m) {
+        var pidx = m.project_id;
+        if (!membersByPid[pidx]) membersByPid[pidx] = [];
+        membersByPid[pidx].push(m);
+      });
+    }
     var stateProjects = [];
     for (i = 0; i < projects.length; i++) {
       var row = projects[i];
       projectOwnerIds[row.id] = row.owner_id;
-      var pmRes = await sb.from("project_members").select("user_id, profiles(display_name)").eq("project_id", row.id);
+      var pmRes = { data: membersByPid[row.id] || [] };
       var memberNames = [];
       var seen = {};
       (pmRes.data || []).forEach(function (m) {
@@ -1026,12 +1049,47 @@
     return out;
   }
 
+  /** 删除「本地 state 已不存在、但仍属于当前用户 owner 的」云端项目及下属数据（仅靠 upsert 无法删项目） */
+  async function deleteOrphanOwnedProjectsFromSupabase(uid) {
+    if (!__sb || !state) return;
+    var keep = {};
+    var pi;
+    for (pi = 0; pi < state.projects.length; pi++) {
+      keep[state.projects[pi].id] = true;
+    }
+    var po = await __sb.from("projects").select("id").eq("owner_id", uid);
+    var rows = po.data || [];
+    for (var oi = 0; oi < rows.length; oi++) {
+      var oid = rows[oi].id;
+      if (keep[oid]) continue;
+      var tRes = await __sb.from("tasks").select("id").eq("project_id", oid);
+      var tids = (tRes.data || []).map(function (r) {
+        return r.id;
+      });
+      if (tids.length) {
+        await __sb.from("task_relations").delete().in("from_task_id", tids);
+        await __sb.from("task_relations").delete().in("to_task_id", tids);
+        await __sb.from("task_comments").delete().in("task_id", tids);
+        await __sb.from("tasks").delete().in("id", tids);
+      }
+      await __sb.from("project_members").delete().eq("project_id", oid);
+      await __sb.from("projects").delete().eq("id", oid);
+      try {
+        delete projectOwnerIds[oid];
+      } catch (eO) {}
+    }
+  }
+
   async function flushSaveToSupabase() {
     if (!useSupabaseMode() || !__sb || !state) return;
     try {
       var ures = await __sb.auth.getUser();
       var uid = ures.data.user && ures.data.user.id;
       if (!uid) return;
+      if (__sbOrphanPurgeNeeded) {
+        await deleteOrphanOwnedProjectsFromSupabase(uid);
+        __sbOrphanPurgeNeeded = false;
+      }
       await __sb.from("profiles").upsert({
         id: uid,
         display_name: state.userName || "",
@@ -1210,6 +1268,19 @@
   async function applySupabaseUser(user) {
     activeAccount = user.email || user.id;
     setSession(activeAccount);
+    var cached = readSbStateCache(user.id);
+    var cacheOk =
+      cached &&
+      ((cached.projects && cached.projects.length) || (cached.tasks && cached.tasks.length));
+    if (cacheOk) {
+      state = migrateStateObject(JSON.parse(JSON.stringify(cached)));
+      postLoadState(state);
+      fixCurrentProjectPointer(state);
+      syncSavedSnapshotFromState(state);
+      applyRouteFromHash();
+      connectSupabaseRealtime();
+      render();
+    }
     state = await loadStateFromSupabase(user.id);
     if (
       state &&
@@ -1227,6 +1298,9 @@
     syncSavedSnapshotFromState(state);
     applyRouteFromHash();
     connectSupabaseRealtime();
+    if (cacheOk) {
+      render();
+    }
   }
 
   async function bootstrapSupabase() {
@@ -1342,11 +1416,21 @@
   var __rtPushTimer = null;
   var __rtVersions = {};
   var __applyingRemoteRealtime = false;
+  /** 本会话内本地已删除的项目 ID：忽略会把该行「复活」的陈旧实时快照（否则列表不立刻更新） */
+  var __sessionDeletedRealtimeProjectIds = {};
 
   function applyRealtimeSnapshotToState(payload) {
     if (!state || !payload || !payload.project) return;
     var pid = payload.projectId || payload.project.id;
     if (!pid) return;
+    if (
+      !state.projects.some(function (p) {
+        return p.id === pid;
+      }) &&
+      __sessionDeletedRealtimeProjectIds[pid]
+    ) {
+      return;
+    }
     var oldTaskIds = {};
     var i;
     for (i = 0; i < state.tasks.length; i++) {
@@ -2030,6 +2114,7 @@
       fixCurrentProjectPointer(state);
       return pid;
     }
+    delete __sessionDeletedRealtimeProjectIds[pid];
     var proj = JSON.parse(JSON.stringify(bundle.project));
     proj.id = pid;
     state.projects.push(proj);
@@ -2793,6 +2878,7 @@
   function deleteProjectById(projectId) {
     var pid = String(projectId || "").trim();
     if (!pid || !state) return false;
+    __sessionDeletedRealtimeProjectIds[pid] = true;
     var taskIds = {};
     var i;
     for (i = 0; i < state.tasks.length; i++) {
@@ -2819,17 +2905,18 @@
         __socket.emit("unsubscribe_project", pid);
       } catch (e) {}
     }
-    if (useSupabaseMode() && __sb) {
-      __sb
-        .from("projects")
-        .delete()
-        .eq("id", pid)
-        .catch(function (e) {
-          console.error(e);
-        });
-    }
     delete projectOwnerIds[pid];
+    if (useSupabaseMode() && __sb) {
+      __sbOrphanPurgeNeeded = true;
+    }
     save(state);
+    if (useSupabaseMode() && __sb) {
+      if (__sbSaveTimer) {
+        clearTimeout(__sbSaveTimer);
+        __sbSaveTimer = null;
+      }
+      flushSaveToSupabase();
+    }
     return true;
   }
 
@@ -6570,16 +6657,16 @@
   function renderAi() {
     return (
       '<div class="ai-page">' +
-      '<div class="page-header"><h2>AI 中心</h2><p class="page-subtitle">优先调用 OpenRouter 生成；不可用或失败时自动使用本地智能规则。会议纪要导入走「AI 结构化」接口。</p></div>' +
-      '<div class="ai-hero"><p>根据当前账号下的任务与项目，一键生成日/周计划与总结：<strong>优先 OpenRouter</strong>（部署环境需配置 OPENROUTER_API_KEY）；不可用或失败时自动使用本地规则并在结果中标注来源。若列表为空，请先到「项目」里新建任务或点侧栏「恢复示例」。</p>' +
+      '<div class="page-header"><h2>AI 中心</h2><p class="page-subtitle">与「会议纪要导入」相同：由服务端汇总任务与项目 JSON，调用 OpenRouter 生成正文；失败时回退本地规则。生成结果顶部含功能、来源与数据说明。</p></div>' +
+      '<div class="ai-hero"><p>流程：<strong>浏览器汇总数据 → POST /api/ai/workgraph-insights → OpenRouter</strong>（需部署 OPENROUTER_API_KEY，与会议纪要解析同源配置）。成功时正文前自动标注【功能】【来源】【数据】。</p>' +
       "</div>" +
       '<div class="ai-grid">' +
-      '<div class="ai-card ai-card--wide"><h3>企业工作全景（AI 综合分析）</h3><p>将当前任务与项目快照一次性交给模型，从负荷、风险、协作与节奏等维度给出面向员工的可执行建议。</p><pre class="ai-output" id="ai-enterprise-pulse">点击下方按钮生成…</pre><div class="ai-actions"><button type="button" class="btn btn-primary" data-ai="enterprise_pulse">生成综合分析</button></div></div>' +
-      '<div class="ai-card"><h3>今日工作报告</h3><p>汇总今日重点事项与执行状态。</p><p class="ai-output" id="ai-daily">点击生成今日工作报告。</p><div class="ai-actions"><button type="button" class="btn btn-primary" data-ai="daily">生成今日工作报告</button></div></div>' +
-      '<div class="ai-card"><h3>今日计划</h3><p>按今天开始/截止的未完成任务排序生成。</p><p class="ai-output" id="ai-day-plan">根据今天作为开始或截止日的未完成任务，按优先级排序（本地规则）。</p><div class="ai-actions"><button type="button" class="btn btn-primary" data-ai="dayplan">生成今日计划</button></div></div>' +
-      '<div class="ai-card"><h3>本周计划</h3><p>按自然周（周一至周日）汇总安排。</p><p class="ai-output" id="ai-week-plan">按自然周（周一至周日）汇总各日 deadline（本地规则）。</p><div class="ai-actions"><button type="button" class="btn btn-primary" data-ai="weekplan">生成本周计划</button></div></div>' +
-      '<div class="ai-card"><h3>项目管理风险</h3><p>识别阻塞、延期与高优先事项。</p><p class="ai-output" id="ai-risk">—</p><div class="ai-actions"><button type="button" class="btn btn-primary" data-ai="risk">AI 分析风险</button></div></div>' +
-      '<div class="ai-card ai-card--wide"><h3>周度工作报告</h3><p>汇总项目进程、完成事项、风险与关键节点；优先 AI 生成，可直接粘贴到汇报文档。</p><div class="ai-actions"><button type="button" class="btn btn-primary" data-ai="weekreport">生成周度工作报告</button></div><pre class="ai-output" id="ai-week-report">点击按钮生成（优先 OpenRouter）…</pre></div>' +
+      '<div class="ai-card ai-card--wide"><h3>企业工作全景（AI 综合分析）</h3><p>将当前任务与项目快照一次性交给模型，从负荷、风险、协作与节奏等维度给出可执行建议。</p><pre class="ai-output" id="ai-enterprise-pulse">点击生成：系统将汇总数据并由 OpenRouter 输出综合分析。</pre><div class="ai-actions"><button type="button" class="btn btn-primary" data-ai="enterprise_pulse">生成综合分析</button></div></div>' +
+      '<div class="ai-card"><h3>每日工作报告（日报）</h3><p>汇总今日重点事项与执行状态。</p><p class="ai-output" id="ai-daily">点击生成日报：汇总任务与项目后发往 OpenRouter。</p><div class="ai-actions"><button type="button" class="btn btn-primary" data-ai="daily">生成日报</button></div></div>' +
+      '<div class="ai-card"><h3>今日计划</h3><p>按今天开始/截止的未完成任务排序生成。</p><p class="ai-output" id="ai-day-plan">点击生成：优先 OpenRouter；失败时按优先级列出今日事项（本地规则）。</p><div class="ai-actions"><button type="button" class="btn btn-primary" data-ai="dayplan">生成今日计划</button></div></div>' +
+      '<div class="ai-card"><h3>本周计划</h3><p>按自然周（周一至周日）汇总安排。</p><p class="ai-output" id="ai-week-plan">点击生成：优先 OpenRouter；失败时按各日 deadline 罗列（本地规则）。</p><div class="ai-actions"><button type="button" class="btn btn-primary" data-ai="weekplan">生成本周计划</button></div></div>' +
+      '<div class="ai-card"><h3>风险摘要</h3><p>识别阻塞、延期与高优先事项。</p><p class="ai-output" id="ai-risk">点击「分析风险」：汇总数据后由 OpenRouter 输出。</p><div class="ai-actions"><button type="button" class="btn btn-primary" data-ai="risk">分析风险</button></div></div>' +
+      '<div class="ai-card ai-card--wide"><h3>周度工作报告</h3><p>汇总项目进程、完成事项、风险与关键节点，可直接粘贴到汇报文档。</p><div class="ai-actions"><button type="button" class="btn btn-primary" data-ai="weekreport">生成周度工作报告</button></div><pre class="ai-output" id="ai-week-report">点击生成：汇总后发 OpenRouter，输出六段式周度汇报。</pre></div>' +
       '<div class="ai-card ai-card--wide"><h3>任务拆解</h3><p>输入任务标题，获得结构化子任务建议。</p><input class="input" id="ai-title" placeholder="输入任务标题" /><div class="ai-actions"><button type="button" class="btn" data-ai="split">拆解建议</button></div><pre class="ai-output" id="ai-split">等待输入任务标题…</pre></div>' +
       '<div class="ai-card ai-card--wide"><h3>会议纪要导入</h3><p>粘贴整段会议纪要或待办清单，一键新建项目或向已有项目追加任务。</p><div class="ai-actions"><button type="button" class="btn btn-primary" data-act="meeting-import">打开导入</button></div></div>' +
       "</div>" +
@@ -7202,9 +7289,20 @@
     }
   }
 
-  function labelWorkgraphOutput(text, fromAi) {
-    var tag = fromAi ? "【来源：AI 大模型（OpenRouter）】" : "【来源：本地规则引擎】";
-    return tag + "\n\n" + String(text || "");
+  /**
+   * 与会议纪要一致：任务/项目 JSON 由服务端 workgraph-insights 汇总并调用 OpenRouter。
+   * fromAi=true：接口成功返回模型正文；false：本页本地规则回退。
+   */
+  function labelWorkgraphOutput(text, fromAi, featureName) {
+    var head = [];
+    if (featureName) head.push("【功能：" + featureName + "】");
+    head.push(fromAi ? "【来源：AI 大模型（OpenRouter）】" : "【来源：本地规则引擎】");
+    head.push(
+      fromAi
+        ? "【数据：已将当前账号项目与任务快照 POST 至 /api/ai/workgraph-insights，与会议纪要共用服务端密钥】"
+        : "【数据：由浏览器根据本地任务列表规则生成（OpenRouter 不可用或未配置 OPENROUTER_API_KEY 时）】"
+    );
+    return head.join("\n") + "\n\n" + String(text || "");
   }
 
   function workgraphInsightPayload(kind, titleOpt) {
@@ -7255,13 +7353,14 @@
       })
       .then(function (o) {
         if (o.r.ok && o.j && o.j.ok && typeof o.j.text === "string" && o.j.text.trim()) {
-          onDone(true, o.j.text);
+          var fromAi = o.j.source === "openrouter" || o.j.source == null;
+          onDone(true, o.j.text, fromAi);
         } else {
-          onDone(false, null);
+          onDone(false, null, false);
         }
       })
       .catch(function () {
-        onDone(false, null);
+        onDone(false, null, false);
       });
   }
 
@@ -7277,13 +7376,14 @@
       })
       .then(function (o) {
         if (o.r.ok && o.j && o.j.ok && typeof o.j.text === "string" && o.j.text.trim()) {
-          onDone(true, o.j.text);
+          var fromAi = o.j.source === "openrouter" || o.j.source == null;
+          onDone(true, o.j.text, fromAi);
         } else {
-          onDone(false, null);
+          onDone(false, null, false);
         }
       })
       .catch(function () {
-        onDone(false, null);
+        onDone(false, null, false);
       });
   }
 
@@ -7330,15 +7430,16 @@
       if (el)
         el.textContent = labelWorkgraphOutput(
           "任务 " + ts.length + " 条，完成 " + done + "，阻塞 " + bl + "。建议优先处理阻塞项。",
-          false
+          false,
+          "每日工作报告（日报）"
         );
     };
     var daily = function () {
       var el = document.getElementById("ai-daily");
-      if (el) el.textContent = "正在生成…";
-      tryWorkgraphAi("daily", null, function (ok, text) {
+      if (el) el.textContent = "正在生成…（汇总数据并请求 OpenRouter）";
+      tryWorkgraphAi("daily", null, function (ok, text, fromAi) {
         if (ok && text) {
-          if (el) el.textContent = labelWorkgraphOutput(text, true);
+          if (el) el.textContent = labelWorkgraphOutput(text, fromAi, "每日工作报告（日报）");
           return;
         }
         dailyLocal();
@@ -7363,7 +7464,11 @@
       var el = document.getElementById("ai-day-plan");
       if (!el) return;
       if (!cand.length) {
-        el.textContent = "今日暂无「开始」或「截止」落在今天的未完成任务。可适当安排预备、联调或回顾。";
+        el.textContent = labelWorkgraphOutput(
+          "今日暂无「开始」或「截止」落在今天的未完成任务。可适当安排预备、联调或回顾。",
+          false,
+          "今日计划"
+        );
         return;
       }
       var lines = ["【今日计划】（本地规则：优先级与 deadline 先后）"];
@@ -7376,14 +7481,14 @@
         );
       }
       lines.push("建议：优先 P0/P1 且「截止今日」；大块任务拆成可验收步骤。");
-      el.textContent = labelWorkgraphOutput(lines.join("\n"), false);
+      el.textContent = labelWorkgraphOutput(lines.join("\n"), false, "今日计划");
     };
     var dayplan = function () {
       var el = document.getElementById("ai-day-plan");
-      if (el) el.textContent = "正在生成…";
-      tryWorkgraphAi("dayplan", null, function (ok, text) {
+      if (el) el.textContent = "正在生成…（汇总数据并请求 OpenRouter）";
+      tryWorkgraphAi("dayplan", null, function (ok, text, fromAi) {
         if (ok && text) {
-          if (el) el.textContent = labelWorkgraphOutput(text, true);
+          if (el) el.textContent = labelWorkgraphOutput(text, fromAi, "今日计划");
           return;
         }
         dayplanLocal();
@@ -7416,14 +7521,14 @@
       if (total === 0) lines.push("本周暂无带 deadline 的未完成任务。");
       else lines.push("提示：与「日程」页切换周视图核对本周 DDL 密度。");
       var el = document.getElementById("ai-week-plan");
-      if (el) el.textContent = labelWorkgraphOutput(lines.join("\n"), false);
+      if (el) el.textContent = labelWorkgraphOutput(lines.join("\n"), false, "本周计划");
     };
     var weekplan = function () {
       var el = document.getElementById("ai-week-plan");
-      if (el) el.textContent = "正在生成…";
-      tryWorkgraphAi("weekplan", null, function (ok, text) {
+      if (el) el.textContent = "正在生成…（汇总数据并请求 OpenRouter）";
+      tryWorkgraphAi("weekplan", null, function (ok, text, fromAi) {
         if (ok && text) {
-          if (el) el.textContent = labelWorkgraphOutput(text, true);
+          if (el) el.textContent = labelWorkgraphOutput(text, fromAi, "本周计划");
           return;
         }
         weekplanLocal();
@@ -7437,15 +7542,16 @@
       if (el)
         el.textContent = labelWorkgraphOutput(
           "延期任务约 " + overdue + " 条；请关注 P0 且未完成任务。",
-          false
+          false,
+          "风险分析"
         );
     };
     var risk = function () {
       var el = document.getElementById("ai-risk");
-      if (el) el.textContent = "正在生成…";
-      tryWorkgraphAi("risk", null, function (ok, text) {
+      if (el) el.textContent = "正在生成…（汇总数据并请求 OpenRouter）";
+      tryWorkgraphAi("risk", null, function (ok, text, fromAi) {
         if (ok && text) {
-          if (el) el.textContent = labelWorkgraphOutput(text, true);
+          if (el) el.textContent = labelWorkgraphOutput(text, fromAi, "风险分析");
           return;
         }
         riskLocal();
@@ -7453,14 +7559,14 @@
     };
     var weekreportLocal = function () {
       var el = document.getElementById("ai-week-report");
-      if (el) el.textContent = labelWorkgraphOutput(buildWeeklyWorkReportText(), false);
+      if (el) el.textContent = labelWorkgraphOutput(buildWeeklyWorkReportText(), false, "周度工作报告");
     };
     var weekreport = function () {
       var el = document.getElementById("ai-week-report");
-      if (el) el.textContent = "正在生成…";
-      tryWorkgraphAi("weekreport", null, function (ok, text) {
+      if (el) el.textContent = "正在生成…（汇总数据并请求 OpenRouter）";
+      tryWorkgraphAi("weekreport", null, function (ok, text, fromAi) {
         if (ok && text) {
-          if (el) el.textContent = labelWorkgraphOutput(text, true);
+          if (el) el.textContent = labelWorkgraphOutput(text, fromAi, "周度工作报告");
           return;
         }
         weekreportLocal();
@@ -7490,13 +7596,13 @@
     };
     var enterprisePulse = function () {
       var el = document.getElementById("ai-enterprise-pulse");
-      if (el) el.textContent = "正在生成…";
-      tryWorkgraphAi("enterprise_pulse", null, function (ok, text) {
+      if (el) el.textContent = "正在生成…（汇总数据并请求 OpenRouter）";
+      tryWorkgraphAi("enterprise_pulse", null, function (ok, text, fromAi) {
         if (ok && text) {
-          if (el) el.textContent = labelWorkgraphOutput(text, true);
+          if (el) el.textContent = labelWorkgraphOutput(text, fromAi, "企业工作全景");
           return;
         }
-        if (el) el.textContent = labelWorkgraphOutput(enterprisePulseLocal(), false);
+        if (el) el.textContent = labelWorkgraphOutput(enterprisePulseLocal(), false, "企业工作全景");
       });
     };
     var btns = appEl.querySelectorAll("[data-ai]");
@@ -7517,9 +7623,9 @@
             return;
           }
           if (pre) pre.textContent = "正在生成…";
-          tryWorkgraphAi("decompose", title, function (ok, text) {
+          tryWorkgraphAi("decompose", title, function (ok, text, fromAi) {
             if (ok && text) {
-              if (pre) pre.textContent = labelWorkgraphOutput(text, true);
+              if (pre) pre.textContent = labelWorkgraphOutput(text, fromAi, "任务拆解");
               return;
             }
             if (pre) {
@@ -7527,7 +7633,8 @@
                 "建议子任务：\n1) " +
                   title +
                   " — 需求澄清\n2) 方案与排期\n3) 开发 / 联调\n4) 验收与上线\n（本地智能规则，OpenRouter 不可用时）",
-                false
+                false,
+                "任务拆解"
               );
             }
           });
@@ -7808,52 +7915,52 @@
       var ew = document.getElementById("sched-ai-out-week");
       var et = document.getElementById("sched-ai-out-todo");
       function fallbackDaily() {
-        if (ed) ed.textContent = labelWorkgraphOutput(buildScheduleAiDailyText(ts), false);
+        if (ed) ed.textContent = labelWorkgraphOutput(buildScheduleAiDailyText(ts), false, "日程·日度计划");
       }
       function fallbackWeekly() {
-        if (ew) ew.textContent = labelWorkgraphOutput(buildScheduleAiWeeklyText(ts), false);
+        if (ew) ew.textContent = labelWorkgraphOutput(buildScheduleAiWeeklyText(ts), false, "日程·本周计划表");
       }
       function fallbackTodo() {
-        if (et) et.textContent = labelWorkgraphOutput(buildScheduleAiTodoText(ts), false);
+        if (et) et.textContent = labelWorkgraphOutput(buildScheduleAiTodoText(ts), false, "日程·待办清单");
       }
       if (kind === "all") {
         if (ed) ed.textContent = "正在生成…";
         if (ew) ew.textContent = "正在生成…";
         if (et) et.textContent = "正在生成…";
-        tryWorkgraphAiPayload(buildScheduleWorkgraphPayload("schedule_daily"), function (ok, text) {
-          if (ok && text && ed) ed.textContent = labelWorkgraphOutput(text, true);
+        tryWorkgraphAiPayload(buildScheduleWorkgraphPayload("schedule_daily"), function (ok, text, fromAi) {
+          if (ok && text && ed) ed.textContent = labelWorkgraphOutput(text, fromAi, "日程·日度计划");
           else fallbackDaily();
         });
-        tryWorkgraphAiPayload(buildScheduleWorkgraphPayload("schedule_weekly"), function (ok, text) {
-          if (ok && text && ew) ew.textContent = labelWorkgraphOutput(text, true);
+        tryWorkgraphAiPayload(buildScheduleWorkgraphPayload("schedule_weekly"), function (ok, text, fromAi) {
+          if (ok && text && ew) ew.textContent = labelWorkgraphOutput(text, fromAi, "日程·本周计划表");
           else fallbackWeekly();
         });
-        tryWorkgraphAiPayload(buildScheduleWorkgraphPayload("schedule_todo"), function (ok, text) {
-          if (ok && text && et) et.textContent = labelWorkgraphOutput(text, true);
+        tryWorkgraphAiPayload(buildScheduleWorkgraphPayload("schedule_todo"), function (ok, text, fromAi) {
+          if (ok && text && et) et.textContent = labelWorkgraphOutput(text, fromAi, "日程·待办清单");
           else fallbackTodo();
         });
         return;
       }
       if (kind === "daily") {
         if (ed) ed.textContent = "正在生成…";
-        tryWorkgraphAiPayload(buildScheduleWorkgraphPayload("schedule_daily"), function (ok, text) {
-          if (ok && text && ed) ed.textContent = labelWorkgraphOutput(text, true);
+        tryWorkgraphAiPayload(buildScheduleWorkgraphPayload("schedule_daily"), function (ok, text, fromAi) {
+          if (ok && text && ed) ed.textContent = labelWorkgraphOutput(text, fromAi, "日程·日度计划");
           else fallbackDaily();
         });
         return;
       }
       if (kind === "weekly") {
         if (ew) ew.textContent = "正在生成…";
-        tryWorkgraphAiPayload(buildScheduleWorkgraphPayload("schedule_weekly"), function (ok, text) {
-          if (ok && text && ew) ew.textContent = labelWorkgraphOutput(text, true);
+        tryWorkgraphAiPayload(buildScheduleWorkgraphPayload("schedule_weekly"), function (ok, text, fromAi) {
+          if (ok && text && ew) ew.textContent = labelWorkgraphOutput(text, fromAi, "日程·本周计划表");
           else fallbackWeekly();
         });
         return;
       }
       if (kind === "todo") {
         if (et) et.textContent = "正在生成…";
-        tryWorkgraphAiPayload(buildScheduleWorkgraphPayload("schedule_todo"), function (ok, text) {
-          if (ok && text && et) et.textContent = labelWorkgraphOutput(text, true);
+        tryWorkgraphAiPayload(buildScheduleWorkgraphPayload("schedule_todo"), function (ok, text, fromAi) {
+          if (ok && text && et) et.textContent = labelWorkgraphOutput(text, fromAi, "日程·待办清单");
           else fallbackTodo();
         });
         return;
