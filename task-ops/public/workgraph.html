@@ -5288,6 +5288,8 @@
     syncMeetMode();
     var elParseAi = document.getElementById("meet-parse-ai");
     var meetingParseCache = { key: "", parsed: null, err: null };
+    var meetImportBusy = false;
+    var meetImportCancelled = false;
     function currentMeetingParseKey() {
       var txt = (ta && ta.value) || "";
       var mode = canUseAiMeetingParse() && elParseAi && elParseAi.checked ? "ai" : "rules";
@@ -5319,6 +5321,7 @@
       callback(parsed, null);
     }
     function doPreview() {
+      if (meetImportBusy) return;
       if (canUseAiMeetingParse() && elParseAi && elParseAi.checked && pre) {
         pre.textContent = "正在请求 AI 解析，请稍候…";
       } else if (pre) {
@@ -5341,16 +5344,48 @@
         }
       });
     }
-    document.getElementById("meet-cancel").onclick = closeModal;
+    var btnMeetApply = document.getElementById("meet-apply");
+    var btnMeetPreview = document.getElementById("meet-preview");
+    var btnMeetCancel = document.getElementById("meet-cancel");
+    function releaseMeetImportUi() {
+      meetImportBusy = false;
+      if (btnMeetApply) {
+        btnMeetApply.disabled = false;
+        btnMeetApply.textContent = "应用导入";
+      }
+      if (btnMeetPreview) btnMeetPreview.disabled = false;
+    }
+    function lockMeetImportUi() {
+      meetImportCancelled = false;
+      meetImportBusy = true;
+      if (btnMeetApply) {
+        btnMeetApply.disabled = true;
+        btnMeetApply.textContent = "导入中…";
+      }
+      if (btnMeetPreview) btnMeetPreview.disabled = true;
+    }
+    btnMeetCancel.onclick = function () {
+      meetImportCancelled = true;
+      if (meetImportBusy) releaseMeetImportUi();
+      closeModal();
+    };
     document.getElementById("meet-preview").onclick = doPreview;
     document.getElementById("meet-apply").onclick = function () {
+      if (meetImportBusy) return;
+      lockMeetImportUi();
       function applyWithParsed(parsed, err) {
+        if (meetImportCancelled) {
+          releaseMeetImportUi();
+          return;
+        }
         if (typeof err === "string") {
           alert(err);
+          releaseMeetImportUi();
           return;
         }
         if (!parsed || !parsed.tasks.length) {
           alert("没有可导入的任务。请检查正文或换用「智能规则」预览。");
+          releaseMeetImportUi();
           return;
         }
         var append = modeAp && modeAp.checked;
@@ -5358,6 +5393,11 @@
         var pid = (document.getElementById("meet-proj") && document.getElementById("meet-proj").value) || "";
         if (append && !pid) {
           alert("请选择要追加任务的已有项目。");
+          releaseMeetImportUi();
+          return;
+        }
+        if (meetImportCancelled) {
+          releaseMeetImportUi();
           return;
         }
         var chain = false;
@@ -5373,26 +5413,38 @@
         });
         if (!r.ok) {
           alert(r.msg || "导入失败");
+          releaseMeetImportUi();
           return;
         }
+        if (meetImportCancelled) {
+          releaseMeetImportUi();
+          return;
+        }
+        if (pre) pre.textContent = "正在保存到账号…";
         persistStateImmediateAsync()
           .then(function () {
+            if (meetImportCancelled) return;
             closeModal();
             alert("已导入 " + parsed.tasks.length + " 条任务。");
             render();
           })
           .catch(function () {
+            if (meetImportCancelled) return;
             closeModal();
             alert("已导入 " + parsed.tasks.length + " 条任务（同步到云端时请保持网络畅通）。");
             render();
+          })
+          .finally(function () {
+            releaseMeetImportUi();
           });
       }
       var cacheKey = currentMeetingParseKey();
       if (meetingParseCache.key === cacheKey && meetingParseCache.parsed) {
+        if (pre) pre.textContent = "正在写入…";
         applyWithParsed(meetingParseCache.parsed, meetingParseCache.err);
         return;
       }
-      if (pre) pre.textContent = "正在解析后应用，请稍候…";
+      if (pre) pre.textContent = "正在解析并导入，请稍候…";
       runMeetingParse(applyWithParsed);
     };
   }
