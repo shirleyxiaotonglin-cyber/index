@@ -87,19 +87,44 @@ async function postCredentialsSignIn(
   }
 }
 
+const DEMO_EMAIL = "435236356@qq.com";
+const DEMO_PASSWORD = "123456";
+
 export function LoginForm() {
   /** 不用 useSearchParams（生产上曾导致 Suspense 一直挂起，页面只显示「加载…」） */
   const [callbackPath, setCallbackPath] = useState("/");
   useEffect(() => {
     try {
       const params = new URLSearchParams(window.location.search);
-      setCallbackPath(normalizeCallbackUrl(params.get("callbackUrl")));
+      const path = normalizeCallbackUrl(params.get("callbackUrl"));
+      setCallbackPath(path);
+      const demo = params.get("demo");
+      if (demo !== "1" && demo !== "true") return;
+      if (sessionStorage.getItem("taskops_demo_url_auto") === "1") return;
+      sessionStorage.setItem("taskops_demo_url_auto", "1");
+      let cancelled = false;
+      void (async () => {
+        setLoading(true);
+        setError(null);
+        const result = await postCredentialsSignIn(DEMO_EMAIL, DEMO_PASSWORD, path);
+        if (cancelled) return;
+        setLoading(false);
+        if (result.ok) return;
+        if (result.serverError) {
+          setError("服务暂时不可用，请稍后重试。若持续失败，请确认 Vercel 已配置 DATABASE_URL、AUTH_SECRET，并已执行 prisma migrate deploy。");
+          return;
+        }
+        setError("登录失败，请检查邮箱与密码。");
+      })();
+      return () => {
+        cancelled = true;
+      };
     } catch {
       setCallbackPath("/");
     }
   }, []);
-  const [email, setEmail] = useState("admin@demo.com");
-  const [password, setPassword] = useState("demo123");
+  const [email, setEmail] = useState(DEMO_EMAIL);
+  const [password, setPassword] = useState(DEMO_PASSWORD);
   const [name, setName] = useState("");
   const [mode, setMode] = useState<"login" | "register">("login");
   const [error, setError] = useState<string | null>(null);
@@ -144,7 +169,7 @@ export function LoginForm() {
     setLoading(true);
     setError(null);
     try {
-      await doSignIn("admin@demo.com", "demo123");
+      await doSignIn(DEMO_EMAIL, DEMO_PASSWORD);
     } catch {
       setError("演示账号登录失败，请检查网络或稍后重试。");
     } finally {
@@ -233,7 +258,12 @@ export function LoginForm() {
               </button>
             )}
           </div>
-          <p className="text-xs text-muted-foreground">演示账号：admin@demo.com / demo123</p>
+          <p className="text-xs text-muted-foreground">
+            演示账号：{DEMO_EMAIL} / {DEMO_PASSWORD}（未跑 seed 时首次登录会自动创建）
+          </p>
+          <p className="text-xs text-muted-foreground">
+            访问 /login?demo=1 可自动以演示账号登录
+          </p>
         </form>
       </CardContent>
     </Card>

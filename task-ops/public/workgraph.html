@@ -527,8 +527,8 @@
   var WELCOME_BANNER_KEY = "workgraph_os_welcome_banner_v1";
 
   /** 登录页「演示账号」固定凭据（本地与在线模式通用用户名/密码） */
-  var DEMO_AUTH_USER = "demo";
-  var DEMO_AUTH_PASS = "demo123456";
+  var DEMO_AUTH_USER = "435236356@qq.com";
+  var DEMO_AUTH_PASS = "123456";
 
   /** 通过 http(s) 打开时由 task-server 提供账号与云端存档（多人各自账号，数据在服务器） */
   var __serverSaveTimer = null;
@@ -4650,6 +4650,19 @@
         });
       };
     }
+    (function prefillDemoAuth() {
+      var iu = document.getElementById("auth-in-user");
+      var ip = document.getElementById("auth-in-pass");
+      if (iu) iu.value = DEMO_AUTH_USER;
+      if (ip) ip.value = DEMO_AUTH_PASS;
+      try {
+        if (location.search.indexOf("demo=1") >= 0 && btnDemo) {
+          setTimeout(function () {
+            btnDemo.click();
+          }, 150);
+        }
+      } catch (e0) {}
+    })();
     var btnUp = document.getElementById("auth-btn-up");
     if (btnUp) {
       btnUp.onclick = function () {

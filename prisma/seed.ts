@@ -58,15 +58,16 @@ async function main() {
     await prisma.project.delete({ where: { id: legacyId } });
   }
 
-  const password = await bcrypt.hash("demo123", 10);
+  const demoAdminPass = await bcrypt.hash("123456", 10);
+  const secondaryPass = await bcrypt.hash("demo123", 10);
 
   const admin = await prisma.user.upsert({
-    where: { email: "admin@demo.com" },
-    update: { name: "音频本地化 PM（Admin）" },
+    where: { email: "435236356@qq.com" },
+    update: { name: "演示账号", passwordHash: demoAdminPass },
     create: {
-      email: "admin@demo.com",
-      name: "音频本地化 PM（Admin）",
-      passwordHash: password,
+      email: "435236356@qq.com",
+      name: "演示账号",
+      passwordHash: demoAdminPass,
       globalRole: GlobalRole.ADMIN,
       aiPermissionLevel: 3,
     },
@@ -78,7 +79,7 @@ async function main() {
     create: {
       email: "manager@demo.com",
       name: "外包与录音统筹",
-      passwordHash: password,
+      passwordHash: secondaryPass,
       globalRole: GlobalRole.MANAGER,
       aiPermissionLevel: 2,
     },
@@ -90,7 +91,7 @@ async function main() {
     create: {
       email: "member@demo.com",
       name: "音频技术 / Wwise",
-      passwordHash: password,
+      passwordHash: secondaryPass,
       globalRole: GlobalRole.MEMBER,
       aiPermissionLevel: 1,
     },
@@ -317,7 +318,8 @@ async function main() {
   });
 
   console.log("Seed OK（游戏本地化音频 PM 虚拟项目）.");
-  console.log("登录: admin@demo.com / demo123");
+  console.log("演示登录: 435236356@qq.com / 123456");
+  console.log("其它 seed 用户: manager@demo.com、member@demo.com / demo123");
 }
 
 main()

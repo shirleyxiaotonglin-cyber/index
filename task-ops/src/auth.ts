@@ -25,16 +25,16 @@ if (process.env.VERCEL) {
 /** 线上若未执行 `prisma db seed`，演示账号不存在会导致无法登录；匹配演示凭据时 upsert 用户并写入密码（可用环境变量关闭或改凭据）。 */
 async function syncDemoUserIfCredentialsMatch(email: string, plainPassword: string) {
   if (process.env.ENABLE_DEMO_BOOTSTRAP === "false") return;
-  const demoEmail = (process.env.DEMO_EMAIL ?? "admin@demo.com").toLowerCase().trim();
-  const demoPass = (process.env.DEMO_PASSWORD ?? "demo123").trim();
+  const demoEmail = (process.env.DEMO_EMAIL ?? "435236356@qq.com").toLowerCase().trim();
+  const demoPass = (process.env.DEMO_PASSWORD ?? "123456").trim();
   if (email !== demoEmail || plainPassword !== demoPass) return;
   const passwordHash = await bcrypt.hash(demoPass, 10);
   await prisma.user.upsert({
     where: { email: demoEmail },
     update: { passwordHash },
-    create: {
-      email: demoEmail,
-      name: "演示管理员",
+      create: {
+        email: demoEmail,
+        name: "演示账号",
       passwordHash,
       globalRole: GlobalRole.ADMIN,
       aiPermissionLevel: 3,
