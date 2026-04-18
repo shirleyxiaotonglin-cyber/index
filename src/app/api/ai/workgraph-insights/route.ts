@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { parseMeetingWithAi } from "@/lib/meeting-parse-openai";
 import {
   runWorkgraphInsightWithOpenRouter,
   type WorkgraphInsightInput,
@@ -48,6 +49,19 @@ export async function POST(req: Request) {
     "schedule_todo",
   ];
   if (!kind || !kinds.includes(kind)) {
+    const text = typeof o.text === "string" ? o.text.trim() : "";
+    const hasToday = String(o.today || "").trim().length > 0;
+    // 会议纪要误 POST 到本路由时仅含 { text }，无 kind/today；委托解析，避免返回「kind 无效」。
+    if (text && !hasToday) {
+      const out = await parseMeetingWithAi(text);
+      if (!out.ok) {
+        const status = /未配置 OpenRouter|OPENROUTER_API_KEY/.test(out.error) ? 503 : 502;
+        return withCors(
+          NextResponse.json({ ok: false, error: out.error, detail: out.detail }, { status })
+        );
+      }
+      return withCors(NextResponse.json({ ok: true, parsed: out.parsed }));
+    }
     return withCors(NextResponse.json({ ok: false, error: "kind 无效" }, { status: 400 }));
   }
   const input: WorkgraphInsightInput = {

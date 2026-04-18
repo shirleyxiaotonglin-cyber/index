@@ -167,7 +167,31 @@ module.exports = async function handler(req, res) {
     "schedule_todo",
   ];
   var kind = String(body.kind || "");
-  if (kinds.indexOf(kind) < 0) return res.status(400).json({ ok: false, error: "kind 无效" });
+  if (kinds.indexOf(kind) < 0) {
+    var mt = String(body.text || "").trim();
+    var hasToday = String(body.today || "").trim();
+    if (mt && !hasToday) {
+      var h = req.headers["x-forwarded-host"] || req.headers.host || "";
+      var p = String(req.headers["x-forwarded-proto"] || "https").split(",")[0].trim() || "https";
+      if (h) {
+        try {
+          var du = p + "://" + h + "/api/ai/parse-meeting";
+          var dr = await fetch(du, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: mt }),
+          });
+          var dtxt = await dr.text();
+          try {
+            return res.status(dr.status).json(JSON.parse(dtxt));
+          } catch (eD) {
+            return res.status(dr.status).send(dtxt);
+          }
+        } catch (eDel) {}
+      }
+    }
+    return res.status(400).json({ ok: false, error: "kind 无效" });
+  }
   if (kind === "decompose" && !String(body.title || "").trim()) {
     return res.status(400).json({ ok: false, error: "decompose 需要 title" });
   }

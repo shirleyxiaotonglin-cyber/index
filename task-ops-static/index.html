@@ -733,8 +733,8 @@
     if (base && String(base).trim()) {
       var b = String(base).trim();
       try {
-        // path 以 / 开头时按「站点根」解析，忽略 base 里误写的 …/api/ai 等，避免误请求 workgraph-insights 出现「kind 无效」。
-        url = new URL(path, b).href;
+        // 仅用配置的协议+主机+端口，忽略路径里误写的 …/api/ai 等，避免误命中其它路由。
+        url = new URL(path, new URL(b).origin).href;
       } catch (e) {
         url = b.replace(/\/+$/, "") + path;
       }
@@ -4882,10 +4882,6 @@
             if (res.data && res.data.detail) msg += "：" + res.data.detail;
             if (!res.ok && res.status === 401) msg = "未登录或会话失效，请重新登录后再试 AI 解析。";
             if (!res.ok && res.status === 503) msg = (res.data && res.data.error) || msg;
-            if (/kind\s*无效/.test(msg)) {
-              msg +=
-                "（若仍出现：请把 workgraph_ai_api_base 设为含 https:// 的站点根；本页已用 URL 解析修正误写的路径后缀，请硬刷新 Ctrl+Shift+R）";
-            }
             var elapsed = Date.now() - startedAt;
             if (isMeetingAiRateLimitedMessage(msg) && elapsed < MEETING_AI_CLIENT_MAX_WAIT_MS) {
               var waitMs = Math.min(MEETING_AI_CLIENT_RETRY_STEP_MS, MEETING_AI_CLIENT_MAX_WAIT_MS - elapsed);
