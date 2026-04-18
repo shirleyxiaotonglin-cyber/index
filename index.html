@@ -934,6 +934,12 @@
     };
   }
 
+  /** preferences 列为默认 {} 时不应视为「已有云端偏好」，否则无法回退到本地缓存 */
+  function isMeaningfulWorkspacePrefs(p) {
+    if (!p || typeof p !== "object") return false;
+    return Object.keys(p).length > 0;
+  }
+
   function mergeWorkspacePrefsIntoState(st, src) {
     if (!st || !src) return;
     if (src.view) st.view = src.view;
@@ -1019,11 +1025,21 @@
       empty.avatar = avatar;
       empty.profileTitle = profileTitle;
       empty.profileBio = profileBio;
-      if (profRes.data && profRes.data.preferences && typeof profRes.data.preferences === "object") {
+      var c0 = readSbStateCache(userId);
+      if (profRes.data && isMeaningfulWorkspacePrefs(profRes.data.preferences)) {
         mergeWorkspacePrefsIntoState(empty, profRes.data.preferences);
-      } else {
-        var c0 = readSbStateCache(userId);
-        if (c0) mergeWorkspacePrefsIntoState(empty, c0);
+      } else if (c0) {
+        mergeWorkspacePrefsIntoState(empty, c0);
+      }
+      if (c0 && c0.view === "projects" && empty.view === "dashboard") {
+        var ok0 = c0.currentProjectId && empty.projects && empty.projects.some(function (p) {
+          return p.id === c0.currentProjectId;
+        });
+        if (ok0) {
+          empty.view = "projects";
+          empty.currentProjectId = c0.currentProjectId;
+          if (c0.workspaceTab) empty.workspaceTab = c0.workspaceTab;
+        }
       }
       return empty;
     }
@@ -1159,11 +1175,21 @@
       relations: rels,
       comments: coms,
     };
-    if (profRes.data && profRes.data.preferences && typeof profRes.data.preferences === "object") {
+    var c1 = readSbStateCache(userId);
+    if (profRes.data && isMeaningfulWorkspacePrefs(profRes.data.preferences)) {
       mergeWorkspacePrefsIntoState(out, profRes.data.preferences);
-    } else {
-      var c1 = readSbStateCache(userId);
-      if (c1) mergeWorkspacePrefsIntoState(out, c1);
+    } else if (c1) {
+      mergeWorkspacePrefsIntoState(out, c1);
+    }
+    if (c1 && c1.view === "projects" && out.view === "dashboard") {
+      var okC = c1.currentProjectId && out.projects && out.projects.some(function (p) {
+        return p.id === c1.currentProjectId;
+      });
+      if (okC) {
+        out.view = "projects";
+        out.currentProjectId = c1.currentProjectId;
+        if (c1.workspaceTab) out.workspaceTab = c1.workspaceTab;
+      }
     }
     migrateStateObject(out);
     postLoadState(out);
@@ -5207,11 +5233,11 @@
       }
       state.tasks.push(t);
     }
-    save(state);
     state.currentProjectId = targetId;
     state.view = "projects";
     state.workspaceTab = "flow";
     state.showFlowOverlay = false;
+    save(state);
     return { ok: true, n: parsed.tasks.length, projectId: targetId };
   }
 
